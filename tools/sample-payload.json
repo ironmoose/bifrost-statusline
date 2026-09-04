@@ -1,0 +1,33 @@
+{
+  "cwd": "/home/user/project",
+  "model": {
+    "id": "claude-opus-4-8[1m]",
+    "display_name": "Opus 4.8 (1M context)"
+  },
+  "workspace": {
+    "current_dir": "/home/user/project",
+    "project_dir": "/home/user/project",
+    "added_dirs": []
+  },
+  "version": "2.1.236",
+  "output_style": {
+    "name": "default"
+  },
+  "context_window": {
+    "total_input_tokens": 76390,
+    "total_output_tokens": 3,
+    "context_window_size": 1000000,
+    "used_percentage": 8,
+    "remaining_percentage": 92
+  },
+  "rate_limits": {
+    "five_hour": {
+      "used_percentage": 7,
+      "resets_at": 1893456000
+    },
+    "seven_day": {
+      "used_percentage": 17,
+      "resets_at": 1893715200
+    }
+  }
+}
