@@ -54,8 +54,6 @@ python3 install-codex.py
 ~/.local/bin/bifrost codex --model gpt-5-codex
 ```
 
-More in [docs/codex.md](docs/codex.md).
-
 ## Configuration
 
 Layout is controlled by constants at the top of `statusline.py`: segment order, gradient style vs. flat fill, an optional frame, and the color ramp. Refresh cadence and how `ctx` differs from Codex's own percentage: [docs/telemetry.md](docs/telemetry.md).
