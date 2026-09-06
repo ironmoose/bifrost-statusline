@@ -4,8 +4,6 @@ A synthwave HUD for a Claude Code session: model, context, and usage windows in 
 
 ![bifrost-statusline](assets/hero.gif)
 
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-
 ## What it shows
 
 - `ctx`, context window used
