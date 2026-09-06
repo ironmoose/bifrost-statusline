@@ -1,7 +1,7 @@
 # bifrost-statusline
 
-A synthwave session HUD for Claude Code and Codex CLI: model, context, and
-usage windows in one line.
+A synthwave session HUD for Claude Code, plus a tmux-based workaround for
+Codex CLI: model, context, and usage windows in one line.
 
 ![bifrost-statusline](assets/hero.gif)
 
@@ -32,6 +32,13 @@ as a dead, empty bar.
 
 ### Codex CLI
 
+> [!IMPORTANT]
+> Bifrost's Codex support is **not a native Codex status-line integration**.
+> Codex's footer only supports its built-in fields and cannot run an external
+> renderer. Bifrost works around that limitation by launching the unmodified
+> Codex CLI inside an isolated tmux server and drawing the Bifrost line in
+> tmux's status bar. Running `codex` directly will not show Bifrost.
+
 Requires Python 3.11+ and `tmux`. Tested against Codex CLI 0.153.4 and tmux
 3.7c. Default install does not touch Codex's own `config.toml`; it lays
 down a self-contained launcher instead:
@@ -58,6 +65,19 @@ as typed -- flags first, a subcommand, a literal prompt, `--help`,
 ~/.local/bin/bifrost codex --help
 ```
 
+To make plain `codex` use the workaround by default in Zsh, add this to
+`~/.zshrc`, then start a new shell (or run `source ~/.zshrc`):
+
+```zsh
+codex() {
+  command bifrost codex "$@"
+}
+```
+
+This only changes interactive Zsh command resolution; it does not turn
+Bifrost into a native Codex feature. Use `command codex` when you need to
+bypass Bifrost and run the underlying CLI directly.
+
 That opens Codex inside a dedicated tmux server (`-L`, isolated from any
 tmux servers or `~/.tmux.conf` you already have) with a bottom status line
 rendering the real Bifrost gauges: the same gradient bars the Claude
@@ -76,19 +96,31 @@ Detach as usual (`Ctrl-b d`); the session and its state keep running, and
 the launcher prints the exact `tmux -L ... attach` command to reconnect.
 Exiting Codex normally -- in the foreground, or later after a detach --
 tears down that session's isolated tmux server and its temporary state
-directory.
+directory. The mouse wheel scrolls tmux's pane history instead of cycling
+through Codex's input history; press `q` to leave tmux copy mode after
+scrolling. Hold `Shift` while dragging if your terminal uses that modifier
+to bypass tmux for native text selection. Bifrost keeps up to 50,000 lines
+of scrollback in its own isolated server.
+
+If Bifrost is launched from inside an existing tmux client, it still creates
+a separate server and does not change the outer server, its sessions, or its
+configuration. The outer client gets first chance to handle mouse and prefix
+events, though, so it may capture the wheel. With tmux's default prefix, use
+`Ctrl-b Ctrl-b [` to enter Bifrost's inner scrollback and `Ctrl-b Ctrl-b d`
+to detach the inner Bifrost session while leaving the outer one attached.
 
 Before the first prompt creates a Codex thread, the status line reads
 "waiting for Codex session...": Codex only fires SessionStart once a
 thread exists, not at idle startup. The usage snapshot (token counts and
 rate-limit percentages) refreshes once per response, same as Claude Code,
 so those numbers hold steady between responses; the reset countdowns keep
-ticking every second regardless, since they're computed live from the
-last known reset time rather than frozen with the snapshot. A rate-limit
+ticking on Bifrost's five-second refresh, since they're computed live from
+the last known reset time rather than frozen with the snapshot. A rate-limit
 window Codex's own reply omits (5h or weekly) is shown as absent rather
 than a fabricated 0%, and a window whose reset timestamp has already
 passed is marked `stale` instead of counting down to a deadline that's
-already wrong.
+already wrong. The tmux renderer checks for updates every five seconds;
+the countdown display itself is minute-granular.
 
 The `ctx` gauge is raw last-turn occupancy
 (`last_token_usage.total_tokens / model_context_window`), not Codex's own
@@ -98,7 +130,7 @@ here to avoid hardcoding a baseline that shifts between Codex releases.
 Codex's own native footer (see below) cannot be reconfigured to show this
 math in place; it always renders its own baseline-adjusted number.
 
-#### Legacy: native Codex footer preset
+#### Alternative: native Codex footer preset (not Bifrost)
 
 Codex also supports a handful of built-in footer fields directly in
 `config.toml`, without tmux. It's a lighter touch if you'd rather not run

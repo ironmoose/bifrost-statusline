@@ -25,6 +25,8 @@ import codex_status
 import statusline
 
 STATE_DIR_PREFIX = "bifrost-codex-"
+TMUX_HISTORY_LIMIT = 50_000
+TMUX_STATUS_INTERVAL = 5
 _REQUIRED_STRING_FIELDS = ("session_id", "transcript_path", "model", "cwd")
 
 
@@ -184,6 +186,17 @@ def _tmux_session_alive(server_name: str) -> bool:
     return check.returncode == 0
 
 
+def _kill_tmux_server(server_name: str) -> None:
+    """Best-effort cleanup of this launch's uniquely named tmux server."""
+    try:
+        subprocess.run(
+            ["tmux", "-L", server_name, "kill-server"],
+            capture_output=True,
+        )
+    except OSError:
+        pass
+
+
 def launch_codex(codex_args: list[str]) -> int:
     """Run Codex inside an isolated tmux server with a live Bifrost footer.
 
@@ -224,25 +237,35 @@ def launch_codex(codex_args: list[str]) -> int:
     # TMPDIR or the install directory survive both tmux and the shell intact.
     quoted_closed_cmd = shlex.quote(closed_cmd)
 
+    nested_tmux = bool(os.environ.get("TMUX"))
     env = dict(os.environ)
-    if env.get("TMUX"):
+    if nested_tmux:
         env.pop("TMUX", None)
         env.pop("TMUX_PANE", None)
 
     tmux_cmd = [
         "tmux", "-L", server_name, "-f", "/dev/null",
-        "new-session", "-s", "codex", codex_cmd,
+        "start-server",
         ";", "set-option", "-g", "exit-empty", "off",
+        # history-limit only applies to panes created after it is set, so all
+        # server options and the cleanup hook must precede new-session.
+        ";", "set-option", "-g", "history-limit", str(TMUX_HISTORY_LIMIT),
         ";", "set-option", "-g", "status-position", "bottom",
-        ";", "set-option", "-g", "status-interval", "1",
+        ";", "set-option", "-g", "status-style", "bg=default,fg=default",
+        ";", "set-option", "-g", "mouse", "on",
+        ";", "set-option", "-g", "status-interval", str(TMUX_STATUS_INTERVAL),
         ";", "set-option", "-g", "status-format[0]", f"#({status_cmd})",
         ";", "set-option", "-g", "default-terminal", "tmux-256color",
         ";", "set-option", "-ga", "terminal-overrides", ",*:Tc",
         ";", "set-hook", "-g", "session-closed", f"run-shell {quoted_closed_cmd}",
+        ";", "new-session", "-s", "codex", codex_cmd,
     ]
 
     print(f"bifrost: launching Codex in tmux (server '{server_name}')")
     print(f"bifrost: if you detach, reconnect with: tmux -L {server_name} attach -t codex")
+    if nested_tmux:
+        print("bifrost: outer tmux detected; its server and configuration will not be changed.")
+        print("bifrost: outer tmux may capture the wheel; use Ctrl-b Ctrl-b [ for Bifrost scrollback.")
 
     try:
         result = subprocess.run(tmux_cmd, env=env)
@@ -253,8 +276,13 @@ def launch_codex(codex_args: list[str]) -> int:
     if _tmux_session_alive(server_name):
         print(f"bifrost: session detached and still running. State kept at {state_dir}.")
         print(f"bifrost: reattach with: tmux -L {server_name} attach -t codex")
+        if nested_tmux:
+            print("bifrost: with default prefixes, Ctrl-b Ctrl-b d detaches the inner Bifrost session.")
         return result.returncode
 
+    # The session-closed hook normally does this. Repeat it defensively so a
+    # setup failure before new-session cannot strand an exit-empty=off server.
+    _kill_tmux_server(server_name)
     cleanup_state(state_dir)
     return result.returncode
 

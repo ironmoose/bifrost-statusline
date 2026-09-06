@@ -249,6 +249,115 @@ class CodexCommandTests(unittest.TestCase):
 
 
 class LaunchCodexTests(unittest.TestCase):
+    @staticmethod
+    def _launch_results():
+        return [
+            subprocess.CompletedProcess([], 0),  # tmux launch/client
+            subprocess.CompletedProcess([], 1),  # no live Codex session
+            subprocess.CompletedProcess([], 0),  # defensive kill-server
+        ]
+
+    def test_mouse_wheel_scrolls_tmux_history_instead_of_codex_input(self):
+        state_dir = Path(tempfile.mkdtemp(prefix=bifrost.STATE_DIR_PREFIX))
+
+        with patch.object(bifrost, "_require_executable"), patch.object(
+            bifrost.tempfile, "mkdtemp", return_value=str(state_dir)
+        ), patch.object(
+            bifrost.subprocess, "run", side_effect=self._launch_results()
+        ) as run, redirect_stdout(io.StringIO()):
+            self.assertEqual(bifrost.launch_codex([]), 0)
+
+        tmux_argv = run.call_args_list[0].args[0]
+        mouse_index = tmux_argv.index("mouse")
+        self.assertEqual(
+            tmux_argv[mouse_index - 3:mouse_index + 2],
+            [";", "set-option", "-g", "mouse", "on"],
+        )
+
+    def test_launch_uses_a_separate_tmux_server_and_private_config(self):
+        state_dir = Path(tempfile.mkdtemp(prefix=bifrost.STATE_DIR_PREFIX))
+
+        with patch.object(bifrost, "_require_executable"), patch.object(
+            bifrost.tempfile, "mkdtemp", return_value=str(state_dir)
+        ), patch.object(
+            bifrost.subprocess, "run", side_effect=self._launch_results()
+        ) as run, redirect_stdout(io.StringIO()):
+            self.assertEqual(bifrost.launch_codex([]), 0)
+
+        tmux_argv = run.call_args_list[0].args[0]
+        self.assertEqual(tmux_argv[0:2], ["tmux", "-L"])
+        self.assertRegex(tmux_argv[2], r"^bifrost-\d+-[0-9a-f]{8}$")
+        self.assertEqual(tmux_argv[3:6], ["-f", "/dev/null", "start-server"])
+        kill_argv = run.call_args_list[-1].args[0]
+        self.assertEqual(kill_argv, ["tmux", "-L", tmux_argv[2], "kill-server"])
+
+    def test_nested_launch_does_not_pass_outer_tmux_identity_to_private_server(self):
+        state_dir = Path(tempfile.mkdtemp(prefix=bifrost.STATE_DIR_PREFIX))
+        out = io.StringIO()
+
+        with patch.dict(
+            os.environ, {"TMUX": "/tmp/tmux-1000/default,1,0", "TMUX_PANE": "%7"}
+        ), patch.object(bifrost, "_require_executable"), patch.object(
+            bifrost.tempfile, "mkdtemp", return_value=str(state_dir)
+        ), patch.object(
+            bifrost.subprocess, "run", side_effect=self._launch_results()
+        ) as run, redirect_stdout(out):
+            self.assertEqual(bifrost.launch_codex([]), 0)
+
+        launch_env = run.call_args_list[0].kwargs["env"]
+        self.assertNotIn("TMUX", launch_env)
+        self.assertNotIn("TMUX_PANE", launch_env)
+        self.assertIn("outer tmux detected", out.getvalue())
+        self.assertIn("Ctrl-b Ctrl-b [", out.getvalue())
+
+    def test_scrollback_limit_is_set_before_the_initial_pane_is_created(self):
+        state_dir = Path(tempfile.mkdtemp(prefix=bifrost.STATE_DIR_PREFIX))
+
+        with patch.object(bifrost, "_require_executable"), patch.object(
+            bifrost.tempfile, "mkdtemp", return_value=str(state_dir)
+        ), patch.object(
+            bifrost.subprocess, "run", side_effect=self._launch_results()
+        ) as run, redirect_stdout(io.StringIO()):
+            self.assertEqual(bifrost.launch_codex([]), 0)
+
+        tmux_argv = run.call_args_list[0].args[0]
+        history_index = tmux_argv.index("history-limit")
+        session_index = tmux_argv.index("new-session")
+        self.assertLess(history_index, session_index)
+        self.assertEqual(tmux_argv[history_index + 1], str(bifrost.TMUX_HISTORY_LIMIT))
+
+    def test_cleanup_hook_is_installed_before_codex_can_exit(self):
+        state_dir = Path(tempfile.mkdtemp(prefix=bifrost.STATE_DIR_PREFIX))
+
+        with patch.object(bifrost, "_require_executable"), patch.object(
+            bifrost.tempfile, "mkdtemp", return_value=str(state_dir)
+        ), patch.object(
+            bifrost.subprocess, "run", side_effect=self._launch_results()
+        ) as run, redirect_stdout(io.StringIO()):
+            self.assertEqual(bifrost.launch_codex(["--version"]), 0)
+
+        tmux_argv = run.call_args_list[0].args[0]
+        hook_index = tmux_argv.index("session-closed")
+        session_index = tmux_argv.index("new-session")
+        self.assertLess(hook_index, session_index)
+
+    def test_status_bar_inherits_terminal_background_and_foreground(self):
+        state_dir = Path(tempfile.mkdtemp(prefix=bifrost.STATE_DIR_PREFIX))
+
+        with patch.object(bifrost, "_require_executable"), patch.object(
+            bifrost.tempfile, "mkdtemp", return_value=str(state_dir)
+        ), patch.object(
+            bifrost.subprocess, "run", side_effect=self._launch_results()
+        ) as run, redirect_stdout(io.StringIO()):
+            self.assertEqual(bifrost.launch_codex([]), 0)
+
+        tmux_argv = run.call_args_list[0].args[0]
+        style_index = tmux_argv.index("status-style")
+        self.assertEqual(
+            tmux_argv[style_index - 3:style_index + 2],
+            [";", "set-option", "-g", "status-style", "bg=default,fg=default"],
+        )
+
     def test_state_dir_creation_failure_exits_cleanly_without_launching_tmux(self):
         out = io.StringIO()
         with patch.object(
@@ -340,6 +449,17 @@ class LaunchCodexTmuxLifecycleTests(unittest.TestCase):
                 server and b"FAKE_CODEX_READY" in output,
                 f"launch never reached a ready fake-codex prompt: {output[-1000:]!r}",
             )
+
+            mouse = subprocess.run(
+                ["tmux", "-L", server, "show-options", "-gv", "mouse"],
+                capture_output=True, text=True, check=True, cwd=str(scratch), env=env,
+            ).stdout.strip()
+            history_limit = subprocess.run(
+                ["tmux", "-L", server, "show-options", "-gv", "history-limit"],
+                capture_output=True, text=True, check=True, cwd=str(scratch), env=env,
+            ).stdout.strip()
+            self.assertEqual(mouse, "on")
+            self.assertEqual(history_limit, str(bifrost.TMUX_HISTORY_LIMIT))
 
             state_dirs = list(tmpdir_root.glob("bifrost-codex-*"))
             self.assertTrue(state_dirs, f"no bifrost-codex-* state dir created under {tmpdir_root}")
