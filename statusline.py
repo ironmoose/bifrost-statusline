@@ -222,7 +222,11 @@ def _window(data: dict, key: str, label: str) -> str:
         return ""
     pct = rl["used_percentage"]
     tail = ""
-    if rl.get("resets_at"):
+    if rl.get("stale"):
+        # A stale window's resets_at is untrustworthy; annotate instead of
+        # counting down to a deadline that may already be wrong.
+        tail = f" {_dim('stale')}"
+    elif rl.get("resets_at"):
         u = until(rl["resets_at"])
         if u:
             tail = f" {_dim(u)}"
@@ -268,12 +272,8 @@ RENDERERS = {
 }
 
 
-def main() -> None:
-    try:
-        data = json.load(sys.stdin)
-    except (json.JSONDecodeError, ValueError):
-        data = {}
-
+def render(data: dict) -> str:
+    """Render one statusline from a Claude Code (or normalized Codex) payload."""
     parts = []
     for seg in SEGMENTS:
         fn = RENDERERS.get(seg)
@@ -287,7 +287,16 @@ def main() -> None:
             parts.append(out)
 
     divider = _dim("│")
-    print(f"{SEP}{divider}{SEP}".join(parts))
+    return f"{SEP}{divider}{SEP}".join(parts)
+
+
+def main() -> None:
+    try:
+        data = json.load(sys.stdin)
+    except (json.JSONDecodeError, ValueError):
+        data = {}
+
+    print(render(data))
 
 
 if __name__ == "__main__":

@@ -1,6 +1,7 @@
 # bifrost-statusline
 
-A synthwave session HUD for Claude Code: model, context, and usage windows in one line.
+A synthwave session HUD for Claude Code and Codex CLI: model, context, and
+usage windows in one line.
 
 ![bifrost-statusline](assets/hero.gif)
 
@@ -28,6 +29,99 @@ as a dead, empty bar.
 ![states](assets/states.png)
 
 ## Install
+
+### Codex CLI
+
+Requires Python 3.11+ and `tmux`. Tested against Codex CLI 0.153.4 and tmux
+3.7c. Default install does not touch Codex's own `config.toml`; it lays
+down a self-contained launcher instead:
+
+```bash
+python3 install-codex.py
+```
+
+That installs `~/.local/bin/bifrost` plus a `share/bifrost/` copy of
+`bifrost.py`, `codex_status.py`, and `statusline.py`. Use `--prefix
+/path/to/prefix` to install elsewhere. Repeat installs are idempotent;
+changed files are backed up first, and a byte-identical repeat install
+touches nothing.
+
+Launch or resume Codex through the installed launcher instead of `codex`
+directly. Every argument after `codex` reaches the real Codex CLI exactly
+as typed -- flags first, a subcommand, a literal prompt, `--help`,
+`--version`, or Codex's own `--` delimiter all pass through untouched:
+
+```bash
+~/.local/bin/bifrost codex
+~/.local/bin/bifrost codex resume
+~/.local/bin/bifrost codex --model gpt-5-codex
+~/.local/bin/bifrost codex --help
+```
+
+That opens Codex inside a dedicated tmux server (`-L`, isolated from any
+tmux servers or `~/.tmux.conf` you already have) with a bottom status line
+rendering the real Bifrost gauges: the same gradient bars the Claude
+renderer draws, not Codex's own footer fields. Codex's UI has no way to
+host an external command's output in place of its live footer, so tmux's
+own status line is what carries it instead. The launch passes
+`--dangerously-bypass-hook-trust`, scoped to that one invocation. That flag
+is not scoped to Bifrost's own hook -- it lets **every** hook configured
+for that invocation run without Codex's usual trust prompt, including
+anything already in your own `config.toml`, not only the SessionStart hook
+Bifrost injects (which itself only ever records the session id,
+transcript path, model, and cwd, nothing else). No permanent Codex config
+is touched.
+
+Detach as usual (`Ctrl-b d`); the session and its state keep running, and
+the launcher prints the exact `tmux -L ... attach` command to reconnect.
+Exiting Codex normally -- in the foreground, or later after a detach --
+tears down that session's isolated tmux server and its temporary state
+directory.
+
+Before the first prompt creates a Codex thread, the status line reads
+"waiting for Codex session...": Codex only fires SessionStart once a
+thread exists, not at idle startup. The usage snapshot (token counts and
+rate-limit percentages) refreshes once per response, same as Claude Code,
+so those numbers hold steady between responses; the reset countdowns keep
+ticking every second regardless, since they're computed live from the
+last known reset time rather than frozen with the snapshot. A rate-limit
+window Codex's own reply omits (5h or weekly) is shown as absent rather
+than a fabricated 0%, and a window whose reset timestamp has already
+passed is marked `stale` instead of counting down to a deadline that's
+already wrong.
+
+The `ctx` gauge is raw last-turn occupancy
+(`last_token_usage.total_tokens / model_context_window`), not Codex's own
+native percentage, which subtracts a version-specific baseline before
+displaying a number; the two will disagree, and raw occupancy was chosen
+here to avoid hardcoding a baseline that shifts between Codex releases.
+Codex's own native footer (see below) cannot be reconfigured to show this
+math in place; it always renders its own baseline-adjusted number.
+
+#### Legacy: native Codex footer preset
+
+Codex also supports a handful of built-in footer fields directly in
+`config.toml`, without tmux. It's a lighter touch if you'd rather not run
+Codex inside tmux, at the cost of Bifrost's ANSI gradient bars,
+context-size badge, and dirty-tree marker, none of which this preset can
+render:
+
+```bash
+python3 install-codex.py --native-footer
+```
+
+This backs up and updates `$CODEX_HOME/config.toml` (default
+`~/.codex/config.toml`), preserving unrelated settings. Restart Codex
+afterward. Use `--config /path/to/config.toml` to target another file.
+
+The preset selects model with reasoning, context used, five-hour limit,
+weekly limit, and Git branch, in that order. Tested against Codex CLI
+0.153.4. Codex's native usage fields have their own formatting and
+availability; they do not reproduce Claude's used-percentage gauges or
+countdown layout. See the [Codex configuration
+reference](https://learn.chatgpt.com/docs/config-file/config-reference#tui-status_line).
+
+### Claude Code
 
 One line, from the public repo (branch `main`):
 
