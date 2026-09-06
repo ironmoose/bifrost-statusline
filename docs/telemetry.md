@@ -36,10 +36,12 @@ Bifrost shows the percentage with no countdown in that case.
 The `ctx` gauge is raw last-turn occupancy:
 `last_token_usage.total_tokens / model_context_window`.
 
-This is not Codex's own native percentage, which subtracts a
-version-specific baseline before displaying a number. The two will disagree.
-Raw occupancy was chosen here to avoid hardcoding a baseline that shifts
-between Codex releases. Codex's native footer (see
-[docs/codex.md](codex.md#alternative-native-codex-footer-preset)) always
-renders its own baseline-adjusted number and cannot be reconfigured to show
-raw occupancy instead.
+This is not Codex's own native percentage. Codex's `context-used` footer field
+subtracts a fixed baseline (currently a hardcoded 12,000 tokens) from the
+window before computing its percentage, so the two disagree, by a margin that
+shifts with how much fixed tooling a session loads. Raw occupancy avoids
+pinning Bifrost to that constant, which Codex may change between releases
+(tracked in [openai/codex#40756](https://github.com/openai/codex/issues/40756)).
+Codex's native footer (see
+[docs/codex.md](codex.md#alternative-native-codex-footer-preset)) has no
+raw-occupancy field; its context fields all route through that baseline math.

@@ -71,10 +71,12 @@ directly under that temp directory with the `bifrost-codex-` prefix.
 
 Codex is launched with `--dangerously-bypass-hook-trust` and
 `-c tui.status_line=[]` and a `SessionStart` hook binding. The bypass flag is
-scoped to that one invocation, but within it, it lets **every** hook
-configured for that invocation run without Codex's usual trust prompt,
-including anything already in your own `config.toml`, not only the
-`SessionStart` hook Bifrost injects.
+scoped to that one invocation, but within it, it lets **every enabled** hook
+run without Codex's usual trust prompt, including anything already in your own
+`config.toml`, not only the `SessionStart` hook Bifrost injects. Explicitly
+disabled hooks stay disabled, and Codex prints a startup warning while the flag
+is active. See Codex's own [CLI
+reference](https://developers.openai.com/codex/cli/reference).
 
 Bifrost's own `SessionStart` hook records exactly four fields: session id,
 transcript path, model, and cwd. No permanent Codex config is touched.
