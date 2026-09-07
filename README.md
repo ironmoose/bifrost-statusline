@@ -1,6 +1,6 @@
 # bifrost-statusline
 
-A synthwave status line for Claude Code: model, context, and usage windows in one line. Also runs with Codex CLI via a tmux workaround.
+A synthwave status line for Claude Code and Codex CLI: model, context, and usage windows in one line.
 
 ![bifrost-statusline](assets/hero.gif)
 
