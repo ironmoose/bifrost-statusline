@@ -1,6 +1,6 @@
 """Exercise config preservation across common TOML layouts, plus the
 --prefix installation flow that lays down a Codex-launchable copy of
-Bifrost (bin/bifrost, share/bifrost/{bifrost,codex_status,statusline}.py).
+Bifrost (bin/bifrost and its runtime modules under share/bifrost).
 """
 import importlib.util
 import os
@@ -71,7 +71,7 @@ class PrefixInstallTests(unittest.TestCase):
         self.assertTrue(launcher.exists())
         self.assertTrue(os.access(launcher, os.X_OK))
         share = self.prefix / "share" / "bifrost"
-        for name in ("bifrost.py", "codex_status.py", "statusline.py"):
+        for name in ("bifrost.py", "codex_status.py", "statusline.py", "desktop_status.py", "desktop.py"):
             with self.subTest(name=name):
                 self.assertTrue((share / name).exists())
 
@@ -97,7 +97,8 @@ class PrefixInstallTests(unittest.TestCase):
     def test_repeat_install_is_byte_identical(self):
         self.assertEqual(self.result.returncode, 0, self.result.stderr)
         share = self.prefix / "share" / "bifrost"
-        before = {name: (share / name).read_bytes() for name in ("bifrost.py", "codex_status.py", "statusline.py")}
+        before = {name: (share / name).read_bytes() for name in (
+            "bifrost.py", "codex_status.py", "statusline.py", "desktop_status.py", "desktop.py")}
         before_launcher = (self.prefix / "bin" / "bifrost").read_bytes()
 
         repeat = _run_installer(["--prefix", str(self.prefix)], self.env)

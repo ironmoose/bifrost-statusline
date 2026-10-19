@@ -52,6 +52,23 @@ python3 install-codex.py
 ~/.local/bin/bifrost codex --model gpt-5-codex
 ```
 
+### Floating desktop strip
+
+The optional desktop strip shows context, five-hour and weekly usage, reset
+times, and the current model in a small always-on-top window. It needs PySide6
+in addition to the normal Bifrost install:
+
+```bash
+python3 -m pip install PySide6
+~/.local/bin/bifrost desktop --session 123e4567-e89b-12d3-a456-426614174000 --title "My Codex chat"
+```
+
+Use the UUID of the Codex session to bind the strip to that exact rollout.
+You can also point it directly at a rollout with `--rollout /path/to/file.jsonl`.
+The strip reads status only; it does not change Codex configuration or start a
+Codex process. See [docs/codex.md](docs/codex.md) for session lookup and
+platform notes.
+
 ## Configuration
 
 Layout is controlled by constants at the top of `statusline.py`: segment order, gradient style vs. flat fill, an optional frame, and the color ramp. Refresh cadence and how `ctx` differs from Codex's own percentage: [docs/telemetry.md](docs/telemetry.md).

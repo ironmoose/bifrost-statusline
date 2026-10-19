@@ -22,6 +22,7 @@ import uuid
 from pathlib import Path
 
 import codex_status
+import desktop_status
 import statusline
 
 STATE_DIR_PREFIX = "bifrost-codex-"
@@ -310,6 +311,48 @@ def _cmd_codex(args: argparse.Namespace) -> int:
     return launch_codex(args.codex_args)
 
 
+def _cmd_desktop(args: argparse.Namespace) -> int:
+    def _status_provider() -> dict[str, object]:
+        if args.session:
+            try:
+                rollout = desktop_status.find_rollout(args.codex_home, args.session)
+            except (OSError, ValueError) as exc:
+                return desktop_status.unavailable_status(f"Cannot resolve Codex session: {exc}")
+            return desktop_status.load_status(rollout)
+        return desktop_status.load_status(args.rollout)
+
+    try:
+        initial_status = _status_provider()
+    except (OSError, ValueError) as exc:
+        print(f"bifrost desktop: {exc}", file=sys.stderr)
+        return 1
+    if initial_status.get("state") == "unavailable" and args.session:
+        detail = initial_status.get("detail")
+        if isinstance(detail, str) and detail.startswith("Cannot resolve Codex session:"):
+            print(f"bifrost desktop: {detail}", file=sys.stderr)
+            return 1
+
+    if os.environ.get("XDG_SESSION_TYPE", "").lower() == "wayland" and os.environ.get("DISPLAY"):
+        os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
+
+    try:
+        import desktop
+    except ModuleNotFoundError as exc:
+        missing_qt = (
+            exc.name == "PySide6"
+            or (isinstance(exc.name, str) and exc.name.startswith("PySide6."))
+        )
+        if missing_qt:
+            print(
+                "bifrost desktop requires PySide6; install it with: "
+                "python3 -m pip install PySide6",
+                file=sys.stderr,
+            )
+            return 1
+        raise
+    return desktop.run_desktop(initial_status, _status_provider, args.title)
+
+
 def _cmd_cleanup(args: argparse.Namespace) -> int:
     cleanup_state(Path(args.state))
     return 0
@@ -331,6 +374,19 @@ def _build_parser() -> argparse.ArgumentParser:
     p_codex = sub.add_parser("codex", help="Launch Codex inside a Bifrost tmux session.")
     p_codex.add_argument("codex_args", nargs=argparse.REMAINDER)
     p_codex.set_defaults(func=_cmd_codex)
+
+    p_desktop = sub.add_parser("desktop", help="Show a floating Codex status strip.")
+    source = p_desktop.add_mutually_exclusive_group(required=True)
+    source.add_argument("--session", help="Bind to this exact Codex session UUID.")
+    source.add_argument("--rollout", type=Path, help="Read status from one rollout JSONL file.")
+    p_desktop.add_argument(
+        "--codex-home",
+        type=Path,
+        default=Path(os.environ.get("CODEX_HOME", Path.home() / ".codex")),
+        help="Codex home directory used to resolve --session.",
+    )
+    p_desktop.add_argument("--title", default="Codex", help="Text shown in the strip footer.")
+    p_desktop.set_defaults(func=_cmd_desktop)
 
     p_cleanup = sub.add_parser("_cleanup", help=argparse.SUPPRESS)
     p_cleanup.add_argument("--state", required=True)

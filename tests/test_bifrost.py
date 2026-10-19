@@ -25,7 +25,7 @@ import termios
 import time
 import tomllib
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 from unittest.mock import patch
@@ -246,6 +246,39 @@ class CodexCommandTests(unittest.TestCase):
         command = doc["hooks"]["SessionStart"][0]["hooks"][0]["command"]
         argv = shlex.split(command)
         self.assertEqual(argv[-1], str(state_dir))
+
+
+class DesktopCommandTests(unittest.TestCase):
+    def test_existing_status_command_does_not_import_desktop_or_qt(self):
+        state_dir = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        real_import = __import__
+        stdout = io.StringIO()
+
+        def reject_desktop_import(name, *args, **kwargs):
+            if name == "desktop" or name.startswith("PySide6"):
+                raise AssertionError(f"unexpected desktop dependency import: {name}")
+            return real_import(name, *args, **kwargs)
+
+        with patch("builtins.__import__", side_effect=reject_desktop_import), redirect_stdout(stdout):
+            result = bifrost.main(["status", "--state", str(state_dir)])
+
+        self.assertEqual(result, 0)
+        self.assertIn("waiting", stdout.getvalue().lower())
+
+    def test_desktop_command_reports_actionable_missing_qt_dependency(self):
+        real_import = __import__
+
+        def missing_qt_import(name, *args, **kwargs):
+            if name.startswith("PySide6"):
+                raise ModuleNotFoundError("No module named 'PySide6'", name="PySide6")
+            return real_import(name, *args, **kwargs)
+
+        stderr = io.StringIO()
+        with patch("builtins.__import__", side_effect=missing_qt_import), redirect_stdout(io.StringIO()), redirect_stderr(stderr):
+            result = bifrost.main(["desktop", "--session", "123e4567-e89b-12d3-a456-426614174000"])
+
+        self.assertNotEqual(result, 0)
+        self.assertIn("python3 -m pip install PySide6", stderr.getvalue())
 
 
 class LaunchCodexTests(unittest.TestCase):

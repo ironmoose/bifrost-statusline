@@ -124,3 +124,37 @@ afterward. Use `--config /path/to/config.toml` to target another file.
 The preset sets, in order: model with reasoning, context used, five-hour
 limit, weekly limit, and git branch. See the [Codex configuration
 reference](https://learn.chatgpt.com/docs/config-file/config-reference#tui-status_line).
+
+## Floating desktop strip
+
+The optional desktop window can watch one Codex session by UUID or read one
+rollout file directly. Install PySide6 in the Python environment used by the
+launcher, then run:
+
+```bash
+~/.local/bin/bifrost desktop --session 123e4567-e89b-12d3-a456-426614174000 --title "My Codex chat"
+~/.local/bin/bifrost desktop --rollout ~/.codex/sessions/2026/10/rollout-...jsonl
+```
+
+The session form searches `CODEX_HOME/sessions/**` (or `~/.codex/sessions/**`)
+for one filename ending in that exact UUID. If no matching rollout exists, the
+strip waits and checks again every two seconds. Multiple matching rollouts are
+reported as ambiguous rather than selecting an unrelated or newer session.
+The direct-rollout form reads only the path supplied. Both forms leave Codex
+configuration untouched and do not launch Codex.
+
+The strip is frameless, movable by dragging its header, and pinned above other
+windows by default. Its pin control toggles always-on-top, and it opens near
+the bottom center of the primary screen. On GNOME Wayland, Bifrost selects Qt's
+XCB platform when an XWayland `DISPLAY` is available and no Qt platform was
+selected in the environment, so normal window placement and pinning remain
+managed by the desktop. Without XWayland, the window manager may limit placement
+or always-on-top behavior.
+
+Context and quota values stay unknown when the rollout has not reported them.
+The strip labels rollout data stale after 120 seconds without a file update and
+keeps the last available metrics visible. For long rollouts, it reads the
+current tail as usual and uses a cached, bounded 8 MiB history lookup when
+the model name is absent there. A missing historical model is retried when
+the rollout grows. If the model is outside that history window and never
+appears in the current tail, the strip shows “Model unavailable.”
