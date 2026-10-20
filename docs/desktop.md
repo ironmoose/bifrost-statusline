@@ -11,6 +11,13 @@ Each bar shows the model, context used, and the five-hour and weekly windows
 with their reset times. Bars color by position on the same ramp as the
 terminal gauge, so a low fill stays cyan and only a high fill reaches red.
 
+## Platforms
+
+macOS and Linux. Windows is not supported yet: the `bifrost` launcher is a
+shell script, and the Claude Code mod finds the home folder through `$HOME`
+and finishes each write with `mv`. The Codex bar and the window itself use
+only Python and PySide6.
+
 ## Install
 
 ```bash

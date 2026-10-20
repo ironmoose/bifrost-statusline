@@ -72,6 +72,9 @@ pass `--claude-status`, `--session <uuid>` or `--rollout <path>`. The strip read
 status only; it never changes Claude Code or Codex configuration. Setup and
 details: [docs/desktop.md](docs/desktop.md).
 
+The strip and its mod run on macOS and Linux. Windows is not supported yet: the
+`bifrost` launcher is a shell script and the mod relies on `$HOME` and `mv`.
+
 ## Configuration
 
 Layout is controlled by constants at the top of `statusline.py`: segment order, gradient style vs. flat fill, an optional frame, and the color ramp. Refresh cadence and how `ctx` differs from Codex's own percentage: [docs/telemetry.md](docs/telemetry.md).
