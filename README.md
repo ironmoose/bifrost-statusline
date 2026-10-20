@@ -54,37 +54,23 @@ python3 install-codex.py
 
 ### Floating desktop strip
 
-The optional desktop strip shows context, five-hour and weekly usage, reset
-times, and the current model in a small always-on-top window. It needs PySide6
-in addition to the normal Bifrost install:
+The optional desktop strip is one small always-on-top window with a bar for each
+tool: Claude Code on top, Codex below. Each bar shows the model, context, and the
+five-hour and weekly windows with reset times. It needs PySide6 in addition to the
+normal Bifrost install:
 
 ```bash
 python3 -m pip install PySide6
-~/.local/bin/bifrost desktop --session 123e4567-e89b-12d3-a456-426614174000 --title "My Codex chat"
+~/.local/bin/bifrost desktop
 ```
 
-Use the UUID of the Codex session to bind the strip to that exact rollout.
-You can also point it directly at a rollout with `--rollout /path/to/file.jsonl`.
-The strip reads status only; it does not change Codex configuration or start a
-Codex process. See [docs/codex.md](docs/codex.md) for session lookup and
-platform notes.
-
-Run `~/.local/bin/bifrost desktop` with no source to watch both tools in one
-window: a Claude Code bar and a Codex bar, the Codex one following whichever
-session wrote its rollout most recently.
-
-For Claude Code alone, run `~/.local/bin/bifrost desktop --claude-status`. It reads
-`~/.claude/bifrost/claude-status.json`, which a Claude Code session writes in the
-same shape it pipes to a `statusLine` command. The session you last sent a prompt
-to owns the file, so the strip follows the session you are working in; the 5h and
-weekly windows are account-wide and stay current from any session. Pass a path to
-read a different file.
-
-The file comes from the Claude Code mod in `claude-mod/bifrost-status`, which also
-shows a compact usage line in the session itself. Copy that folder to
-`~/.claude/mods/bifrost-status` and add
-`"CLAUDE_CODE_PLUGIN_DIRS": "~/.claude/mods/bifrost-status"` to the `env` block of
-`~/.claude/settings.json`; sessions started after that load it.
+The Claude Code bar follows the session you last sent a prompt to; the Codex bar
+follows the session whose rollout was written most recently. The Claude Code bar
+needs the small mod in `claude-mod/bifrost-status`, which also works in the Claude
+desktop app (where a `statusLine` command doesn't run). To watch one source only,
+pass `--claude-status`, `--session <uuid>` or `--rollout <path>`. The strip reads
+status only; it never changes Claude Code or Codex configuration. Setup and
+details: [docs/desktop.md](docs/desktop.md).
 
 ## Configuration
 
@@ -92,6 +78,7 @@ Layout is controlled by constants at the top of `statusline.py`: segment order, 
 
 ## Docs
 
+- [docs/desktop.md](docs/desktop.md): the floating desktop strip and its Claude Code mod
 - [docs/codex.md](docs/codex.md): Codex CLI setup and internals
 - [docs/telemetry.md](docs/telemetry.md): how the numbers work
 - [docs/development.md](docs/development.md): tests and regenerating assets

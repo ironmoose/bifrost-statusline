@@ -127,9 +127,11 @@ reference](https://learn.chatgpt.com/docs/config-file/config-reference#tui-statu
 
 ## Floating desktop strip
 
-The optional desktop window can watch one Codex session by UUID or read one
-rollout file directly. Install PySide6 in the Python environment used by the
-launcher, then run:
+`bifrost desktop` with no arguments shows Codex next to Claude Code in one
+window and follows the most recently written rollout; see
+[desktop.md](desktop.md). A single-source window can instead watch one Codex
+session by UUID or read one rollout file directly. Install PySide6 in the
+Python environment used by the launcher, then run:
 
 ```bash
 ~/.local/bin/bifrost desktop --session 123e4567-e89b-12d3-a456-426614174000 --title "My Codex chat"
