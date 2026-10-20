@@ -1,8 +1,9 @@
-"""Present Codex rollout snapshots as plain desktop-strip status data."""
+"""Present Codex rollouts and Claude Code status files as plain desktop-strip status data."""
 
 from __future__ import annotations
 
 from collections import OrderedDict
+import json
 import math
 from pathlib import Path
 import time
@@ -11,6 +12,19 @@ import uuid
 import codex_status
 
 STALE_AFTER_SECONDS = 120
+CLAUDE_STATUS_PATH = Path("~/.claude/bifrost/claude-status.json")
+_DETAILS = {
+    "Codex": {
+        "waiting": "Waiting for Codex telemetry",
+        "stale": "Rollout has not changed for {age} seconds",
+        "ready": "Live Codex status",
+    },
+    "Claude Code": {
+        "waiting": "Waiting for Claude Code telemetry",
+        "stale": "Claude Code status has not changed for {age} seconds",
+        "ready": "Live Claude Code status",
+    },
+}
 _USAGE_LABELS = {"five_hour": "5h", "seven_day": "Weekly"}
 _MODEL_HISTORY_BYTES = 8 * 1024 * 1024
 _MODEL_CACHE_LIMIT = 64
@@ -121,12 +135,31 @@ def find_rollout(codex_home: Path | str, session_id: str) -> Path | None:
     return matches[0] if matches else None
 
 
+def find_latest_rollout(codex_home: Path | str) -> Path | None:
+    """Find the Codex rollout written most recently, the session in use now."""
+    sessions_dir = Path(codex_home).expanduser() / "sessions"
+    newest: tuple[float, Path] | None = None
+    try:
+        for path in sessions_dir.rglob("rollout-*.jsonl"):
+            try:
+                modified = path.stat().st_mtime
+            except OSError:
+                continue
+            if path.is_file() and (newest is None or modified > newest[0]):
+                newest = (modified, path)
+    except OSError as exc:
+        raise OSError(f"unable to search Codex sessions under {sessions_dir}") from exc
+    return None if newest is None else newest[1]
+
+
 def present_status(
     snapshot: dict[str, object],
     now: float | None = None,
     updated_at: float | None = None,
+    source: str = "Codex",
 ) -> dict[str, object]:
-    """Normalize a parsed Codex snapshot for the desktop strip."""
+    """Normalize a statusLine-shaped snapshot from `source` for the desktop strip."""
+    details = _DETAILS[source]
     now = time.time() if now is None else now
     snapshot = snapshot if isinstance(snapshot, dict) else {}
 
@@ -181,16 +214,16 @@ def present_status(
     has_data = has_model or context_percent is not None or token_total is not None or bool(usage)
     if not has_data:
         state = "waiting"
-        detail = "Waiting for Codex telemetry"
+        detail = details["waiting"]
     elif age is None:
         state = "waiting"
         detail = "Waiting for rollout timestamp"
     elif age > STALE_AFTER_SECONDS:
         state = "stale"
-        detail = f"Rollout has not changed for {int(age)} seconds"
+        detail = details["stale"].format(age=int(age))
     else:
         state = "ready"
-        detail = "Live Codex status"
+        detail = details["ready"]
 
     return {
         "state": state,
@@ -223,6 +256,19 @@ def load_status(path: Path | str | None, now: float | None = None) -> dict[str, 
     except OSError:
         return _empty_status("unavailable", "Unable to read Codex rollout")
     return present_status(snapshot, now=now, updated_at=updated_at)
+
+
+def load_claude_status(path: Path | str, now: float | None = None) -> dict[str, object]:
+    """Read the statusLine-shaped file a Claude Code session writes for the strip."""
+    try:
+        status_file = Path(path).expanduser()
+        payload = json.loads(status_file.read_text(encoding="utf-8"))
+        updated_at = status_file.stat().st_mtime
+    except FileNotFoundError:
+        return _empty_status("waiting", "Waiting for a Claude Code session")
+    except (OSError, ValueError):
+        return _empty_status("unavailable", "Unable to read Claude Code status")
+    return present_status(payload, now=now, updated_at=updated_at, source="Claude Code")
 
 
 def unavailable_status(detail: str = "Codex rollout selection unavailable") -> dict[str, object]:

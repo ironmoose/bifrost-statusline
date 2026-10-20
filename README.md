@@ -69,6 +69,23 @@ The strip reads status only; it does not change Codex configuration or start a
 Codex process. See [docs/codex.md](docs/codex.md) for session lookup and
 platform notes.
 
+Run `~/.local/bin/bifrost desktop` with no source to watch both tools in one
+window: a Claude Code bar and a Codex bar, the Codex one following whichever
+session wrote its rollout most recently.
+
+For Claude Code alone, run `~/.local/bin/bifrost desktop --claude-status`. It reads
+`~/.claude/bifrost/claude-status.json`, which a Claude Code session writes in the
+same shape it pipes to a `statusLine` command. The session you last sent a prompt
+to owns the file, so the strip follows the session you are working in; the 5h and
+weekly windows are account-wide and stay current from any session. Pass a path to
+read a different file.
+
+The file comes from the Claude Code mod in `claude-mod/bifrost-status`, which also
+shows a compact usage line in the session itself. Copy that folder to
+`~/.claude/mods/bifrost-status` and add
+`"CLAUDE_CODE_PLUGIN_DIRS": "~/.claude/mods/bifrost-status"` to the `env` block of
+`~/.claude/settings.json`; sessions started after that load it.
+
 ## Configuration
 
 Layout is controlled by constants at the top of `statusline.py`: segment order, gradient style vs. flat fill, an optional frame, and the color ramp. Refresh cadence and how `ctx` differs from Codex's own percentage: [docs/telemetry.md](docs/telemetry.md).

@@ -28,7 +28,7 @@ import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 BIFROST_PATH = ROOT / "bifrost.py"
@@ -279,6 +279,41 @@ class DesktopCommandTests(unittest.TestCase):
 
         self.assertNotEqual(result, 0)
         self.assertIn("python3 -m pip install PySide6", stderr.getvalue())
+
+    def test_claude_status_flag_reads_the_default_status_file(self):
+        args = bifrost._build_parser().parse_args(["desktop", "--claude-status"])
+
+        self.assertEqual(args.claude_status, bifrost.desktop_status.CLAUDE_STATUS_PATH)
+        self.assertIsNone(args.session)
+        self.assertIsNone(args.rollout)
+
+    def test_claude_status_strip_reads_the_named_file_and_titles_itself(self):
+        status_file = Path(self.enterContext(tempfile.TemporaryDirectory())) / "claude-status.json"
+        status_file.write_text(json.dumps({"model": {"display_name": "claude-opus-5-5"}}))
+        fake_desktop = MagicMock()
+        fake_desktop.run_desktop.return_value = 0
+
+        with patch.dict(sys.modules, {"desktop": fake_desktop}):
+            result = bifrost.main(["desktop", "--claude-status", str(status_file)])
+
+        self.assertEqual(result, 0)
+        [(title, initial_status, provider)] = fake_desktop.run_desktop.call_args.args[0]
+        self.assertEqual(title, "Claude Code")
+        self.assertEqual(initial_status["model"], "claude-opus-5-5")
+        self.assertEqual(provider()["model"], "claude-opus-5-5")
+
+    def test_desktop_without_a_source_shows_claude_and_the_latest_codex_session(self):
+        codex_home = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        fake_desktop = MagicMock()
+        fake_desktop.run_desktop.return_value = 0
+
+        with patch.dict(sys.modules, {"desktop": fake_desktop}):
+            result = bifrost.main(["desktop", "--codex-home", str(codex_home)])
+
+        self.assertEqual(result, 0)
+        sources = fake_desktop.run_desktop.call_args.args[0]
+        self.assertEqual([title for title, _, _ in sources], ["Claude Code", "Codex"])
+        self.assertEqual(sources[1][1]["detail"], "Waiting for Codex session")
 
 
 class LaunchCodexTests(unittest.TestCase):

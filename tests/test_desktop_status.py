@@ -2,6 +2,7 @@
 
 import importlib.util
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -76,6 +77,17 @@ class FindRolloutTests(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             desktop_status.find_rollout(self.codex_home, SESSION_ID)
+
+    def test_latest_rollout_is_the_most_recently_written(self):
+        older = self._rollout(f"rollout-2026-10-17T12-00-00-{SESSION_ID}.jsonl")
+        newer = self._rollout(f"rollout-2026-10-18T12-00-00-{OTHER_SESSION_ID}.jsonl")
+        os.utime(newer, (NOW - 60, NOW - 60))
+        os.utime(older, (NOW - 5, NOW - 5))
+
+        self.assertEqual(desktop_status.find_latest_rollout(self.codex_home), older)
+
+    def test_latest_rollout_is_none_without_sessions(self):
+        self.assertIsNone(desktop_status.find_latest_rollout(self.codex_home))
 
 
 class PresentStatusTests(unittest.TestCase):
@@ -227,6 +239,49 @@ class LoadStatusTests(unittest.TestCase):
 
         self.assertEqual(updated_result["model"], updated_model)
         self.assertEqual(updated_result["context_percent"], 20.0)
+
+
+class LoadClaudeStatusTests(unittest.TestCase):
+    def setUp(self):
+        self.path = Path(self.enterContext(tempfile.TemporaryDirectory())) / "claude-status.json"
+
+    def _write(self, payload, mtime=NOW - 10):
+        self.path.write_text(json.dumps(payload))
+        os.utime(self.path, (mtime, mtime))
+
+    def test_reads_a_claude_status_payload(self):
+        self._write(_snapshot(model={"display_name": "claude-opus-5-5"}, session_id=SESSION_ID))
+
+        result = desktop_status.load_claude_status(self.path, now=NOW)
+
+        self.assertEqual(result["state"], "ready")
+        self.assertEqual(result["model"], "claude-opus-5-5")
+        self.assertEqual(result["context_percent"], 42.5)
+        self.assertEqual([item["label"] for item in result["usage"]], ["5h", "Weekly"])
+        self.assertEqual(result["detail"], "Live Claude Code status")
+
+    def test_missing_file_waits_for_a_claude_session(self):
+        result = desktop_status.load_claude_status(self.path, now=NOW)
+
+        self.assertEqual(result["state"], "waiting")
+        self.assertEqual(result["detail"], "Waiting for a Claude Code session")
+
+    def test_malformed_file_is_unavailable(self):
+        self.path.write_text("{not json")
+
+        result = desktop_status.load_claude_status(self.path, now=NOW)
+
+        self.assertEqual(result["state"], "unavailable")
+        self.assertIsNone(result["context_percent"])
+
+    def test_old_file_is_stale_with_claude_wording(self):
+        self._write(_snapshot(), mtime=NOW - 121)
+
+        result = desktop_status.load_claude_status(self.path, now=NOW)
+
+        self.assertEqual(result["state"], "stale")
+        self.assertEqual(result["detail"], "Claude Code status has not changed for 121 seconds")
+        self.assertEqual(result["context_percent"], 42.5)
 
 
 if __name__ == "__main__":

@@ -11,6 +11,7 @@ See README.md for the exact hook and tmux wiring this replaces.
 from __future__ import annotations
 
 import argparse
+from collections.abc import Callable
 import json
 import os
 import shlex
@@ -311,21 +312,41 @@ def _cmd_codex(args: argparse.Namespace) -> int:
     return launch_codex(args.codex_args)
 
 
-def _cmd_desktop(args: argparse.Namespace) -> int:
-    def _status_provider() -> dict[str, object]:
-        if args.session:
-            try:
-                rollout = desktop_status.find_rollout(args.codex_home, args.session)
-            except (OSError, ValueError) as exc:
-                return desktop_status.unavailable_status(f"Cannot resolve Codex session: {exc}")
-            return desktop_status.load_status(rollout)
-        return desktop_status.load_status(args.rollout)
+def _desktop_sources(args: argparse.Namespace) -> list[tuple[str, Callable[[], dict[str, object]]]]:
+    """Pick the strip's panels: one named source, or Claude Code and the latest Codex session."""
+    def codex_session() -> dict[str, object]:
+        try:
+            rollout = desktop_status.find_rollout(args.codex_home, args.session)
+        except (OSError, ValueError) as exc:
+            return desktop_status.unavailable_status(f"Cannot resolve Codex session: {exc}")
+        return desktop_status.load_status(rollout)
 
+    def latest_codex() -> dict[str, object]:
+        try:
+            rollout = desktop_status.find_latest_rollout(args.codex_home)
+        except OSError as exc:
+            return desktop_status.unavailable_status(str(exc))
+        return desktop_status.load_status(rollout)
+
+    if args.claude_status:
+        return [(args.title or "Claude Code", lambda: desktop_status.load_claude_status(args.claude_status))]
+    if args.session:
+        return [(args.title or "Codex", codex_session)]
+    if args.rollout:
+        return [(args.title or "Codex", lambda: desktop_status.load_status(args.rollout))]
+    return [
+        ("Claude Code", lambda: desktop_status.load_claude_status(desktop_status.CLAUDE_STATUS_PATH)),
+        ("Codex", latest_codex),
+    ]
+
+
+def _cmd_desktop(args: argparse.Namespace) -> int:
     try:
-        initial_status = _status_provider()
+        sources = [(title, provider(), provider) for title, provider in _desktop_sources(args)]
     except (OSError, ValueError) as exc:
         print(f"bifrost desktop: {exc}", file=sys.stderr)
         return 1
+    initial_status = sources[0][1]
     if initial_status.get("state") == "unavailable" and args.session:
         detail = initial_status.get("detail")
         if isinstance(detail, str) and detail.startswith("Cannot resolve Codex session:"):
@@ -350,7 +371,7 @@ def _cmd_desktop(args: argparse.Namespace) -> int:
             )
             return 1
         raise
-    return desktop.run_desktop(initial_status, _status_provider, args.title)
+    return desktop.run_desktop(sources)
 
 
 def _cmd_cleanup(args: argparse.Namespace) -> int:
@@ -375,17 +396,30 @@ def _build_parser() -> argparse.ArgumentParser:
     p_codex.add_argument("codex_args", nargs=argparse.REMAINDER)
     p_codex.set_defaults(func=_cmd_codex)
 
-    p_desktop = sub.add_parser("desktop", help="Show a floating Codex status strip.")
-    source = p_desktop.add_mutually_exclusive_group(required=True)
+    p_desktop = sub.add_parser(
+        "desktop",
+        help="Show a floating status strip: Claude Code and the latest Codex session, "
+        "or one named source.",
+    )
+    source = p_desktop.add_mutually_exclusive_group()
     source.add_argument("--session", help="Bind to this exact Codex session UUID.")
     source.add_argument("--rollout", type=Path, help="Read status from one rollout JSONL file.")
+    source.add_argument(
+        "--claude-status",
+        nargs="?",
+        type=Path,
+        const=desktop_status.CLAUDE_STATUS_PATH,
+        help="Read the status file Claude Code sessions write (default: %(const)s).",
+    )
     p_desktop.add_argument(
         "--codex-home",
         type=Path,
         default=Path(os.environ.get("CODEX_HOME", Path.home() / ".codex")),
         help="Codex home directory used to resolve --session.",
     )
-    p_desktop.add_argument("--title", default="Codex", help="Text shown in the strip footer.")
+    p_desktop.add_argument(
+        "--title", help="Panel title for a single named source (default: Codex or Claude Code)."
+    )
     p_desktop.set_defaults(func=_cmd_desktop)
 
     p_cleanup = sub.add_parser("_cleanup", help=argparse.SUPPRESS)

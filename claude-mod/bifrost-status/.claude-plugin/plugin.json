@@ -1,0 +1,1 @@
+{ "name": "bifrost-status", "version": "0.2.0", "description": "Compact usage status line, plus ~/.claude/bifrost/claude-status.json for the bifrost desktop strip" }
