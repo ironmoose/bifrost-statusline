@@ -7,11 +7,13 @@ import math
 import sys
 
 from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QColor, QFontDatabase, QPainter
 from PySide6.QtWidgets import (
     QApplication,
     QFrame,
     QHBoxLayout,
     QLabel,
+    QLayout,
     QProgressBar,
     QPushButton,
     QSizePolicy,
@@ -26,13 +28,15 @@ _COLORS = {
     "text": "#f0eaf7",
     "dim": "#b8afc6",
     "track": "#352b46",
-    "edge": "#50405f",
     "cyan": "#00e5ff",
     "purple": "#a25eff",
     "pink": "#ff2e97",
     "orange": "#ff6c3a",
     "red": "#ff3a5c",
 }
+
+# Every metric column is this wide, so context, 5h and weekly line up.
+_METRIC_WIDTH = 124
 
 
 def _label(text: str, name: str, parent: QWidget | None = None) -> QLabel:
@@ -67,30 +71,52 @@ def _rgb(color: tuple) -> str:
     return "#{:02x}{:02x}{:02x}".format(*color)
 
 
-def _chunk_gradient(percent: float) -> str:
-    """The ramp from 0 up to `percent`, so a bar heats up only as it fills, like the terminal gauge."""
-    end = max(0.0, min(100.0, percent))
-    if end == 0:
-        return _rgb(statusline._ramp(0))
-    stops = [(position * 100, color) for position, color in statusline.SYNTH_STOPS if position * 100 < end]
-    stops.append((end, statusline._ramp(end)))
-    points = ", ".join(f"stop:{at / end:.4f} {_rgb(color)}" for at, color in stops)
-    return f"qlineargradient(x1:0, y1:0, x2:1, y2:0, {points})"
+def _block_colors(percent: int, blocks: int) -> list[tuple]:
+    """Colors of the lit blocks, each by its position on the ramp, so a bar heats up only as it fills."""
+    lit = math.ceil(max(0, min(100, percent)) * blocks / 100)
+    return [statusline._ramp((index + 0.5) * 100 / blocks) for index in range(lit)]
 
 
-def _set_bar(bar: QProgressBar, value: object) -> None:
-    bar.setValue(_bar_value(value))
-    bar.setStyleSheet(
-        f"QProgressBar::chunk {{ border-radius: 3px; background: {_chunk_gradient(_bar_value(value))}; }}"
-    )
+def _short_count(count: int) -> str:
+    if count >= 999_500:
+        return f"{count / 1_000_000:.3g}M"
+    if count >= 1_000:
+        return f"{round(count / 1_000)}k"
+    return str(count)
 
 
 def _tokens_text(used: object, window: object) -> str:
     used_number = _number(used)
     window_number = _number(window)
     if used_number is None or window_number is None:
-        return "Token count unavailable"
-    return f"{int(used_number):,} / {int(window_number):,} tokens"
+        return "Tokens unavailable"
+    return f"{_short_count(int(used_number))} / {_short_count(int(window_number))}"
+
+
+class _PixelBar(QProgressBar):
+    """A progress bar drawn as square blocks, like an 8-bit health bar."""
+
+    _BLOCK = 6
+    _GAP = 2
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setFixedHeight(self._BLOCK + 4)
+
+    def paintEvent(self, event) -> None:
+        step = self._BLOCK + self._GAP
+        blocks = max(1, (self.width() + self._GAP) // step)
+        lit = _block_colors(self.value(), blocks)
+        painter = QPainter(self)
+        for index in range(blocks):
+            x = index * step
+            if index >= len(lit):
+                painter.fillRect(x, 0, self._BLOCK, self.height(), QColor(_COLORS["track"]))
+                continue
+            color = QColor(_rgb(lit[index]))
+            painter.fillRect(x, 0, self._BLOCK, self.height(), color)
+            painter.fillRect(x, 0, self._BLOCK, 2, color.lighter(150))
+        painter.end()
 
 
 class _DragHandle(QWidget):
@@ -132,38 +158,24 @@ class SourcePanel(QFrame):
         layout.addLayout(header)
 
         metrics = QHBoxLayout()
-        metrics.setSpacing(20)
+        metrics.setSpacing(16)
 
-        context_panel_widget = QWidget(self)
-        context_panel = QVBoxLayout(context_panel_widget)
-        context_panel.setContentsMargins(0, 0, 0, 0)
-        context_panel.setSpacing(3)
-        context_top = QHBoxLayout()
-        context_name = _label("Context", "Context usage heading")
-        context_name.setObjectName("metric-title")
-        context_top.addWidget(context_name)
-        self._context_percent = _label("—", "Context percent")
-        self._context_percent.setObjectName("context-percent")
-        self._context_percent.setAlignment(
-            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        context_panel, self._context_percent, self._context_bar, self._tokens = self._metric_panel(
+            "Context", "context", "Tokens unavailable"
         )
-        context_top.addWidget(self._context_percent)
-        context_panel.addLayout(context_top)
-        self._context_bar = self._bar("context")
-        context_panel.addWidget(self._context_bar)
-        self._tokens = _label("Token count unavailable", "Context token count")
-        self._tokens.setObjectName("tokens")
-        context_panel.addWidget(self._tokens)
-        metrics.addWidget(context_panel_widget, 3)
-
+        metrics.addWidget(context_panel)
         self._add_usage_panel(metrics, "5h", "five_hour", "usage-five")
         self._add_usage_panel(metrics, "Weekly", "seven_day", "usage-week")
+        metrics.addStretch(1)
         layout.addLayout(metrics)
 
         footer = QHBoxLayout()
         footer.setSpacing(12)
         self._detail = _label(f"Waiting for {title} telemetry", "Status details")
         self._detail.setObjectName("detail")
+        # Wrap long details instead of letting them widen the strip.
+        self._detail.setWordWrap(True)
+        self._detail.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self._detail.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         self._state = _label("WAITING", "Status state")
         self._state.setObjectName("state")
@@ -173,7 +185,7 @@ class SourcePanel(QFrame):
 
     @staticmethod
     def _bar(object_name: str) -> QProgressBar:
-        bar = QProgressBar()
+        bar = _PixelBar()
         bar.setObjectName(object_name)
         bar.setRange(0, 100)
         bar.setValue(0)
@@ -181,8 +193,12 @@ class SourcePanel(QFrame):
         bar.setAccessibleName(f"{object_name.replace('-', ' ')} percentage")
         return bar
 
-    def _add_usage_panel(self, metrics: QHBoxLayout, label: str, key: str, bar_name: str) -> None:
+    def _metric_panel(
+        self, label: str, bar_name: str, caption: str
+    ) -> tuple[QWidget, QLabel, QProgressBar, QLabel]:
+        """One fixed-width column: heading, percent, bar and a caption line."""
         panel_widget = QWidget(self)
+        panel_widget.setFixedWidth(_METRIC_WIDTH)
         panel = QVBoxLayout(panel_widget)
         panel.setContentsMargins(0, 0, 0, 0)
         panel.setSpacing(3)
@@ -190,14 +206,18 @@ class SourcePanel(QFrame):
         heading.setObjectName("metric-title")
         panel.addWidget(heading)
         percent = _label("—", f"{label} usage percent")
-        percent.setObjectName("usage-percent")
+        percent.setObjectName("metric-percent")
         panel.addWidget(percent)
         bar = self._bar(bar_name)
         panel.addWidget(bar)
-        reset = _label("Usage unavailable", f"{label} reset time")
-        reset.setObjectName("reset")
-        panel.addWidget(reset)
-        metrics.addWidget(panel_widget, 1)
+        caption_label = _label(caption, f"{label} caption")
+        caption_label.setObjectName("caption")
+        panel.addWidget(caption_label)
+        return panel_widget, percent, bar, caption_label
+
+    def _add_usage_panel(self, metrics: QHBoxLayout, label: str, key: str, bar_name: str) -> None:
+        panel_widget, percent, bar, reset = self._metric_panel(label, bar_name, "Usage unavailable")
+        metrics.addWidget(panel_widget)
         self._usage_labels[key] = (percent, bar, reset)
         self._usage_panels[key] = panel_widget
 
@@ -208,7 +228,7 @@ class SourcePanel(QFrame):
 
         context_percent = _number(status.get("context_percent"))
         self._context_percent.setText(_percent_text(context_percent))
-        _set_bar(self._context_bar, context_percent)
+        self._context_bar.setValue(_bar_value(context_percent))
         self._context_bar.setVisible(context_percent is not None)
         self._tokens.setText(_tokens_text(status.get("used_tokens"), status.get("window_tokens")))
 
@@ -230,7 +250,7 @@ class SourcePanel(QFrame):
             self._usage_panels[key].show()
             percentage = _number(entry.get("used_percent"))
             percent_label.setText(_percent_text(percentage))
-            _set_bar(bar, percentage)
+            bar.setValue(_bar_value(percentage))
             bar.setVisible(percentage is not None)
             reset_text = str(entry.get("reset_text") or "Reset time unknown")
             stale = entry.get("stale") is True
@@ -265,7 +285,6 @@ class StripWindow(QWidget):
             | Qt.WindowType.WindowStaysOnTopHint,
         )
         self.setWindowTitle("Bifrost desktop status")
-        self.setFixedWidth(610)
         self.setAccessibleName("Bifrost status strip")
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.panels: list[SourcePanel] = []
@@ -274,29 +293,31 @@ class StripWindow(QWidget):
             panel.update_status(status or {})
 
     def _build_ui(self, titles: list[str]) -> None:
+        # The platform's own fixed-width family, named exactly so Qt needn't resolve an alias.
+        mono = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont).family()
         self.setStyleSheet(f"""
             QWidget#strip {{
                 background: transparent; color: {_COLORS['text']};
-                font-family: monospace; font-size: 12px;
+                font-family: "{mono}"; font-size: 12px;
             }}
             QFrame#card {{
-                background: {_COLORS['surface']}; border: 1px solid {_COLORS['edge']};
-                border-radius: 13px;
+                background: {_COLORS['surface']};
+                border: 2px solid qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 {_COLORS['cyan']}, stop:0.5 {_COLORS['purple']}, stop:1 {_COLORS['pink']});
+                border-radius: 4px;
             }}
-            QLabel {{ color: {_COLORS['text']}; background: transparent; border: 0; }}
-            QLabel#brand {{ color: {_COLORS['dim']}; font-size: 11px; letter-spacing: 1px; }}
+            QLabel {{
+                color: {_COLORS['text']}; background: transparent; border: 0;
+                font-family: "{mono}";
+            }}
+            QLabel#brand {{ color: {_COLORS['cyan']}; font-size: 11px; font-weight: 600; letter-spacing: 2px; }}
             QLabel#model {{ color: {_COLORS['dim']}; font-size: 12px; }}
             QLabel#metric-title {{ color: {_COLORS['dim']}; font-size: 11px; }}
-            QLabel#context-percent {{ font-size: 29px; font-weight: 600; }}
-            QLabel#usage-percent {{ font-size: 20px; font-weight: 600; }}
-            QLabel#detail, QLabel#tokens, QLabel#reset {{
+            QLabel#metric-percent {{ font-size: 20px; font-weight: 600; }}
+            QLabel#detail, QLabel#caption {{
                 color: {_COLORS['dim']}; font-size: 11px;
             }}
             QLabel#state {{ color: {_COLORS['cyan']}; font-size: 10px; font-weight: 600; }}
-            QProgressBar {{
-                background: {_COLORS['track']}; border: 0; border-radius: 3px;
-                min-height: 9px; max-height: 9px; text-align: left;
-            }}
             QPushButton {{
                 background: transparent; border: 0; border-radius: 5px;
                 color: {_COLORS['text']}; min-width: 26px; min-height: 26px;
@@ -312,6 +333,8 @@ class StripWindow(QWidget):
         self.setObjectName("strip")
 
         outer = QVBoxLayout(self)
+        # The window follows its content, so it shrinks when a usage column is hidden.
+        outer.setSizeConstraint(QLayout.SizeConstraint.SetFixedSize)
         outer.setContentsMargins(17, 12, 17, 10)
         outer.setSpacing(0)
 

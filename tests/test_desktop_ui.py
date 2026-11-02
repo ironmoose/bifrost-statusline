@@ -146,14 +146,45 @@ class DesktopStripWidgetTests(unittest.TestCase):
                 "state": "ready", "context_percent": 10.0,
                 "usage": [{"label": "5h", "used_percent": 90.0, "reset_text": "Resets in 1h"}],
             })])
+            window.show()
+            app.processEvents()
             panel = window.panels[0]
-            low = panel._context_bar.styleSheet()
-            high = panel._usage_labels["five_hour"][1].styleSheet()
-            red = module._rgb(module.statusline.SYNTH_STOPS[-1][1])
-            magenta = module._rgb(module.statusline.SYNTH_STOPS[2][1])
-            assert module._rgb(module.statusline._ramp(10)) in low
-            assert magenta not in low and red not in low
-            assert magenta in high
+
+            def reds(bar):
+                image = bar.grab().toImage()
+                row = image.height() - 1
+                block_centers = range(3, image.width() - 6, 8)  # 6px blocks, 2px gaps
+                return {image.pixelColor(x, row).red() for x in block_centers}
+
+            assert max(reds(panel._context_bar)) < 100
+            assert max(reds(panel._usage_labels["five_hour"][1])) > 200
+            window.close()
+            '''
+        )
+
+    def test_context_column_is_as_wide_as_the_weekly_column(self):
+        self._run_qt_assertions(
+            '''
+            import importlib.util
+            import sys
+            from PySide6.QtWidgets import QApplication
+
+            spec = importlib.util.spec_from_file_location("bifrost_ui_widths", sys.argv[1])
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            app = QApplication([])
+            window = module.StripWindow([("Codex", {
+                "state": "ready", "context_percent": 21.2,
+                "used_tokens": 175578, "window_tokens": 828400,
+                "usage": [{"label": "Weekly", "used_percent": 1.0, "reset_text": "Resets in 126h 51m"}],
+                "detail": "Rollout has not changed for 456 seconds",
+            })])
+            window.show()
+            app.processEvents()
+            panel = window.panels[0]
+            weekly_bar = panel._usage_labels["seven_day"][1]
+            assert panel._context_bar.width() == weekly_bar.width()
+            assert panel._tokens.text() == "176k / 828k"
             window.close()
             '''
         )
