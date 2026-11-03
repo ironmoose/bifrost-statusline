@@ -101,4 +101,8 @@ with no source yet (no status file, no rollout) waits and keeps checking.
 ## Window controls
 
 Drag the header to move the window. The pin button toggles always-on-top and
-the × closes it. It opens near the bottom center of the primary screen.
+the × closes it. It reopens where you last moved it, saved with Qt's
+`QSettings` as `bifrost`/`desktop-strip` (on macOS,
+`~/Library/Preferences/com.bifrost.desktop-strip.plist`). The first time, or
+when that spot is no longer on any screen, it opens near the bottom center
+of the primary screen.

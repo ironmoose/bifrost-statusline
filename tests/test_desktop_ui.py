@@ -226,6 +226,49 @@ class DesktopStripWidgetTests(unittest.TestCase):
             '''
         )
 
+    def test_the_strip_reopens_where_it_was_last_moved(self):
+        self._run_qt_assertions(
+            '''
+            import importlib.util
+            import os
+            import sys
+            import tempfile
+            from PySide6.QtCore import QPoint, QSettings
+            from PySide6.QtWidgets import QApplication
+
+            spec = importlib.util.spec_from_file_location("bifrost_ui_position", sys.argv[1])
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            app = QApplication([])
+            path = os.path.join(tempfile.mkdtemp(), "desktop.ini")
+            status = [("Codex", {"state": "waiting"})]
+
+            def settings():
+                return QSettings(path, QSettings.Format.IniFormat)
+
+            first = module.StripWindow(status, settings())
+            first.show()
+            module.place_window(first)
+            default = first.pos()
+            first.move(40, 50)
+            app.processEvents()
+            first.close()
+
+            second = module.StripWindow(status, settings())
+            second.show()
+            module.place_window(second)
+            assert second.pos() == QPoint(40, 50), second.pos()
+
+            off_screen = settings()
+            off_screen.setValue("position", QPoint(-9000, -9000))
+            off_screen.sync()
+            third = module.StripWindow(status, settings())
+            third.show()
+            module.place_window(third)
+            assert third.pos() == default, (third.pos(), default)
+            '''
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -6,8 +6,8 @@ from collections.abc import Callable, Sequence
 import math
 import sys
 
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QColor, QFontDatabase, QPainter
+from PySide6.QtCore import QPoint, QSettings, Qt, QTimer
+from PySide6.QtGui import QColor, QFontDatabase, QGuiApplication, QPainter
 from PySide6.QtWidgets import (
     QApplication,
     QFrame,
@@ -279,7 +279,11 @@ class SourcePanel(QFrame):
 class StripWindow(QWidget):
     """Show a live, frameless status strip with one panel per source."""
 
-    def __init__(self, sources: Sequence[tuple[str, dict[str, object]]]) -> None:
+    def __init__(
+        self,
+        sources: Sequence[tuple[str, dict[str, object]]],
+        settings: QSettings | None = None,
+    ) -> None:
         super().__init__(
             None,
             Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint
@@ -289,8 +293,29 @@ class StripWindow(QWidget):
         self.setAccessibleName("Bifrost status strip")
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.panels: list[SourcePanel] = []
+        self.settings = settings
+        # Save once a drag settles, so a killed strip still reopens where it was.
+        self._save_timer = QTimer(self)
+        self._save_timer.setSingleShot(True)
+        self._save_timer.setInterval(500)
+        self._save_timer.timeout.connect(self._save_position)
         self._build_ui([title for title, _ in sources])
         self.update_sources([status for _, status in sources])
+
+    def _save_position(self) -> None:
+        if self.settings is not None:
+            self.settings.setValue("position", self.pos())
+            self.settings.sync()
+
+    def moveEvent(self, event) -> None:
+        super().moveEvent(event)
+        if self.isVisible():
+            self._save_timer.start()
+
+    def closeEvent(self, event) -> None:
+        self._save_timer.stop()
+        self._save_position()
+        super().closeEvent(event)
 
     def update_sources(self, statuses: Sequence[dict[str, object]]) -> None:
         """Update each panel, showing the idle line only when every source is closed."""
@@ -401,18 +426,31 @@ class StripWindow(QWidget):
 StatusProvider = Callable[[], dict[str, object]]
 
 
-def run_desktop(sources: Sequence[tuple[str, dict[str, object], StatusProvider]]) -> int:
-    """Run the strip with one panel per `(title, initial_status, provider)`, refreshed every two seconds."""
-    app = QApplication.instance() or QApplication(sys.argv[:1])
-    window = StripWindow([(title, initial) for title, initial, _ in sources])
+def place_window(window: StripWindow) -> None:
+    """Move the strip to its saved position, or to the bottom center when that is off every screen."""
     window.adjustSize()
-    screen = app.primaryScreen()
+    saved = window.settings.value("position") if window.settings is not None else None
+    # The brand corner must land on a screen, or the strip could not be dragged back.
+    if isinstance(saved, QPoint) and QGuiApplication.screenAt(saved + QPoint(20, 20)) is not None:
+        window.move(saved)
+        return
+    screen = QGuiApplication.primaryScreen()
     if screen is not None:
         available = screen.availableGeometry()
         x = available.x() + (available.width() - window.width()) // 2
         y = available.y() + available.height() - window.height() - 30
         window.move(x, y)
+
+
+def run_desktop(sources: Sequence[tuple[str, dict[str, object], StatusProvider]]) -> int:
+    """Run the strip with one panel per `(title, initial_status, provider)`, refreshed every two seconds."""
+    app = QApplication.instance() or QApplication(sys.argv[:1])
+    window = StripWindow(
+        [(title, initial) for title, initial, _ in sources], QSettings("bifrost", "desktop-strip")
+    )
+    # Place after showing: before that, macOS Qt still allows for a title bar, and the strip creeps up 20px a launch.
     window.show()
+    place_window(window)
 
     def refresh() -> None:
         window.update_sources([provider() for _, _, provider in sources])
