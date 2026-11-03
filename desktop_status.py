@@ -6,6 +6,7 @@ from collections import OrderedDict
 import json
 import math
 from pathlib import Path
+import subprocess
 import time
 import uuid
 
@@ -269,6 +270,22 @@ def load_claude_status(path: Path | str, now: float | None = None) -> dict[str, 
     except (OSError, ValueError):
         return _empty_status("unavailable", "Unable to read Claude Code status")
     return present_status(payload, now=now, updated_at=updated_at, source="Claude Code")
+
+
+def program_running(name: str) -> bool:
+    """Whether a process whose executable is named `name` is running; True when `ps` cannot say."""
+    try:
+        result = subprocess.run(
+            ["ps", "-A", "-o", "comm="], capture_output=True, text=True, timeout=5, check=True
+        )
+    except (OSError, subprocess.SubprocessError):
+        return True
+    return any(Path(line.strip()).name == name for line in result.stdout.splitlines())
+
+
+def closed_status(source: str) -> dict[str, object]:
+    """Build the status of a source whose app is not running, so the strip hides its panel."""
+    return _empty_status("closed", f"{source} is not running")
 
 
 def unavailable_status(detail: str = "Codex rollout selection unavailable") -> dict[str, object]:

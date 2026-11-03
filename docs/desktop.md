@@ -11,6 +11,11 @@ Each bar shows the model, context used, and the five-hour and weekly windows
 with their reset times. Bars color by position on the same ramp as the
 terminal gauge, so a low fill stays cyan and only a high fill reaches red.
 
+A bar hides while its tool is not running (no process named `claude` or
+`codex`), and comes back within two seconds of the tool starting. The Claude
+desktop app alone doesn't count: its Code sessions run `claude` processes. A
+source named with `--claude-status`, `--session` or `--rollout` always shows.
+
 ## Platforms
 
 macOS and Linux. Windows is not supported yet: the `bifrost` launcher is a

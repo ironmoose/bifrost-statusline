@@ -313,7 +313,7 @@ def _cmd_codex(args: argparse.Namespace) -> int:
 
 
 def _desktop_sources(args: argparse.Namespace) -> list[tuple[str, Callable[[], dict[str, object]]]]:
-    """Pick the strip's panels: one named source, or Claude Code and the latest Codex session."""
+    """Pick the strip's panels: one named source, or Claude Code and the latest Codex session while each runs."""
     def codex_session() -> dict[str, object]:
         try:
             rollout = desktop_status.find_rollout(args.codex_home, args.session)
@@ -334,9 +334,21 @@ def _desktop_sources(args: argparse.Namespace) -> list[tuple[str, Callable[[], d
         return [(args.title or "Codex", codex_session)]
     if args.rollout:
         return [(args.title or "Codex", lambda: desktop_status.load_status(args.rollout))]
+    def while_running(
+        source: str, program: str, provider: Callable[[], dict[str, object]]
+    ) -> Callable[[], dict[str, object]]:
+        def status() -> dict[str, object]:
+            if not desktop_status.program_running(program):
+                return desktop_status.closed_status(source)
+            return provider()
+        return status
+
     return [
-        ("Claude Code", lambda: desktop_status.load_claude_status(desktop_status.CLAUDE_STATUS_PATH)),
-        ("Codex", latest_codex),
+        ("Claude Code", while_running(
+            "Claude Code", "claude",
+            lambda: desktop_status.load_claude_status(desktop_status.CLAUDE_STATUS_PATH),
+        )),
+        ("Codex", while_running("Codex", "codex", latest_codex)),
     ]
 
 

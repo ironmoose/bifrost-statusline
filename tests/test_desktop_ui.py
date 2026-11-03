@@ -189,6 +189,43 @@ class DesktopStripWidgetTests(unittest.TestCase):
             '''
         )
 
+    def test_a_closed_source_hides_its_panel_until_it_runs_again(self):
+        self._run_qt_assertions(
+            '''
+            import importlib.util
+            import sys
+            from PySide6.QtWidgets import QApplication
+
+            spec = importlib.util.spec_from_file_location("bifrost_ui_closed", sys.argv[1])
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            app = QApplication([])
+            ready = {"state": "ready", "model": "claude-opus-5-5", "context_percent": 27.0}
+            closed = {"state": "closed", "detail": "Codex is not running"}
+            window = module.StripWindow([("Claude Code", ready), ("Codex", closed)])
+            window.show()
+            app.processEvents()
+            claude, codex = window.panels
+            assert claude.isVisible()
+            assert codex.isHidden()
+            assert window._idle.isHidden()
+            height_with_one = window.height()
+
+            window.update_sources([closed, closed])
+            app.processEvents()
+            assert claude.isHidden() and codex.isHidden()
+            assert window._idle.isVisible()
+            assert window._idle.text() == "Waiting for Claude Code or Codex to start"
+
+            window.update_sources([ready, ready])
+            app.processEvents()
+            assert claude.isVisible() and codex.isVisible()
+            assert window._idle.isHidden()
+            assert window.height() > height_with_one
+            window.close()
+            '''
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

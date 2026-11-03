@@ -263,6 +263,7 @@ class SourcePanel(QFrame):
 
         state = status.get("state")
         state_label = state.upper() if isinstance(state, str) else "UNAVAILABLE"
+        self.setHidden(state_label == "CLOSED")
         state_colors = {
             "READY": _COLORS["cyan"],
             "STALE": _COLORS["orange"],
@@ -289,8 +290,13 @@ class StripWindow(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.panels: list[SourcePanel] = []
         self._build_ui([title for title, _ in sources])
-        for panel, (_, status) in zip(self.panels, sources):
+        self.update_sources([status for _, status in sources])
+
+    def update_sources(self, statuses: Sequence[dict[str, object]]) -> None:
+        """Update each panel, showing the idle line only when every source is closed."""
+        for panel, status in zip(self.panels, statuses):
             panel.update_status(status or {})
+        self._idle.setHidden(any(not panel.isHidden() for panel in self.panels))
 
     def _build_ui(self, titles: list[str]) -> None:
         # The platform's own fixed-width family, named exactly so Qt needn't resolve an alias.
@@ -378,6 +384,10 @@ class StripWindow(QWidget):
             card_layout.addWidget(panel)
             self.panels.append(panel)
 
+        self._idle = _label(f"Waiting for {' or '.join(titles)} to start", "Idle status")
+        self._idle.setObjectName("detail")
+        card_layout.addWidget(self._idle)
+
     def _set_pinned(self, pinned: bool) -> None:
         self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, pinned)
         self._pin_button.setText("Unpin" if pinned else "Pin")
@@ -405,8 +415,7 @@ def run_desktop(sources: Sequence[tuple[str, dict[str, object], StatusProvider]]
     window.show()
 
     def refresh() -> None:
-        for panel, (_, _, provider) in zip(window.panels, sources):
-            panel.update_status(provider())
+        window.update_sources([provider() for _, _, provider in sources])
 
     timer = QTimer(window)
     timer.setInterval(2000)

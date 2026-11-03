@@ -65,7 +65,8 @@ python3 -m pip install PySide6
 ```
 
 The Claude Code bar follows the session you last sent a prompt to; the Codex bar
-follows the session whose rollout was written most recently. The Claude Code bar
+follows the session whose rollout was written most recently. Each bar hides while
+its tool is not running. The Claude Code bar
 needs the small mod in `claude-mod/bifrost-status`, which also works in the Claude
 desktop app (where a `statusLine` command doesn't run). To watch one source only,
 pass `--claude-status`, `--session <uuid>` or `--rollout <path>`. The strip reads

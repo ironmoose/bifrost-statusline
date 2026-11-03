@@ -307,13 +307,45 @@ class DesktopCommandTests(unittest.TestCase):
         fake_desktop = MagicMock()
         fake_desktop.run_desktop.return_value = 0
 
-        with patch.dict(sys.modules, {"desktop": fake_desktop}):
+        with patch.dict(sys.modules, {"desktop": fake_desktop}), patch.object(
+            bifrost.desktop_status, "program_running", return_value=True
+        ):
             result = bifrost.main(["desktop", "--codex-home", str(codex_home)])
 
         self.assertEqual(result, 0)
         sources = fake_desktop.run_desktop.call_args.args[0]
         self.assertEqual([title for title, _, _ in sources], ["Claude Code", "Codex"])
         self.assertEqual(sources[1][1]["detail"], "Waiting for Codex session")
+
+    def test_desktop_closes_the_panel_of_a_tool_that_is_not_running(self):
+        codex_home = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        fake_desktop = MagicMock()
+        fake_desktop.run_desktop.return_value = 0
+        running = {"claude": True, "codex": False}
+
+        with patch.dict(sys.modules, {"desktop": fake_desktop}), patch.object(
+            bifrost.desktop_status, "program_running", side_effect=lambda name: running[name]
+        ):
+            bifrost.main(["desktop", "--codex-home", str(codex_home)])
+            (_, claude, _), (_, codex, codex_provider) = fake_desktop.run_desktop.call_args.args[0]
+            self.assertNotEqual(claude["state"], "closed")
+            self.assertEqual(codex["state"], "closed")
+
+            running["codex"] = True
+            self.assertEqual(codex_provider()["detail"], "Waiting for Codex session")
+
+    def test_a_named_source_shows_even_when_its_tool_is_not_running(self):
+        status_file = Path(self.enterContext(tempfile.TemporaryDirectory())) / "claude-status.json"
+        fake_desktop = MagicMock()
+        fake_desktop.run_desktop.return_value = 0
+
+        with patch.dict(sys.modules, {"desktop": fake_desktop}), patch.object(
+            bifrost.desktop_status, "program_running", return_value=False
+        ):
+            bifrost.main(["desktop", "--claude-status", str(status_file)])
+
+        [(_, initial_status, _)] = fake_desktop.run_desktop.call_args.args[0]
+        self.assertNotEqual(initial_status["state"], "closed")
 
 
 class LaunchCodexTests(unittest.TestCase):

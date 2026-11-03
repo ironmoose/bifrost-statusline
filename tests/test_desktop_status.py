@@ -284,5 +284,39 @@ class LoadClaudeStatusTests(unittest.TestCase):
         self.assertEqual(result["context_percent"], 42.5)
 
 
+class ProgramRunningTests(unittest.TestCase):
+    def _ps(self, stdout):
+        return patch.object(
+            desktop_status.subprocess,
+            "run",
+            return_value=desktop_status.subprocess.CompletedProcess([], 0, stdout=stdout),
+        )
+
+    def test_matches_the_executable_name_not_a_path_that_mentions_it(self):
+        listing = (
+            "/sbin/launchd\n"
+            "/Users/me/Library/Application Support/Claude/claude-code/2.1/claude.app/Contents/MacOS/claude\n"
+            "/Users/me/.codex/plugins/cache/extension-host/ChatGPT for Chrome\n"
+        )
+        with self._ps(listing):
+            self.assertTrue(desktop_status.program_running("claude"))
+        with self._ps(listing):
+            self.assertFalse(desktop_status.program_running("codex"))
+
+    def test_the_desktop_app_alone_is_not_claude_code(self):
+        with self._ps("/Applications/Claude.app/Contents/MacOS/Claude\n"):
+            self.assertFalse(desktop_status.program_running("claude"))
+
+    def test_counts_as_running_when_ps_cannot_be_read(self):
+        with patch.object(desktop_status.subprocess, "run", side_effect=OSError("no ps")):
+            self.assertTrue(desktop_status.program_running("codex"))
+
+    def test_closed_status_names_the_source(self):
+        result = desktop_status.closed_status("Codex")
+
+        self.assertEqual(result["state"], "closed")
+        self.assertEqual(result["detail"], "Codex is not running")
+
+
 if __name__ == "__main__":
     unittest.main()
