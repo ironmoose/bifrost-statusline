@@ -115,14 +115,15 @@ class DesktopStripWidgetTests(unittest.TestCase):
             spec.loader.exec_module(module)
             app = QApplication([])
             window = module.StripWindow([
-                ("Claude Code", {"state": "ready", "model": "claude-opus-5-5", "context_percent": 27.0}),
+                ("Claude Code", {"state": "ready", "model": "claude-opus-5-5", "context_percent": 27.0, "session_name": "IO-2484"}),
                 ("Codex", {"state": "waiting", "model": "gpt-5-codex", "context_percent": None}),
             ])
             window.show()
             app.processEvents()
             claude, codex = window.panels
             assert claude._title.text() == "Claude Code"
-            assert claude._model_label.text() == "claude-opus-5-5"
+            assert claude._session_label.text() == "IO-2484"
+            assert "claude-opus-5-5" in claude._session_label.toolTip()
             assert claude._context_percent.text() == "27%"
             assert codex._title.text() == "Codex"
             assert codex._state.text() == "WAITING"
@@ -200,7 +201,7 @@ class DesktopStripWidgetTests(unittest.TestCase):
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
             app = QApplication([])
-            ready = {"state": "ready", "model": "claude-opus-5-5", "context_percent": 27.0}
+            ready = {"state": "ready", "model": "claude-opus-5-5", "context_percent": 27.0, "session_name": "IO-2484"}
             closed = {"state": "closed", "detail": "Codex is not running"}
             window = module.StripWindow([("Claude Code", ready), ("Codex", closed)])
             window.show()
@@ -209,7 +210,7 @@ class DesktopStripWidgetTests(unittest.TestCase):
             assert claude.isVisible()
             assert codex.isHidden()
             assert window._idle.isHidden()
-            height_with_one = window.height()
+            width_with_one = window.width()
 
             window.update_sources([closed, closed])
             app.processEvents()
@@ -221,9 +222,101 @@ class DesktopStripWidgetTests(unittest.TestCase):
             app.processEvents()
             assert claude.isVisible() and codex.isVisible()
             assert window._idle.isHidden()
-            assert window.height() > height_with_one
+            assert window.width() > width_with_one
             window.close()
             '''
+        )
+
+    def test_two_sources_fit_the_dock_band_without_clipped_metrics(self):
+        self._run_qt_assertions(
+            """
+            import desktop
+            from PySide6.QtWidgets import QApplication, QLabel
+            app = QApplication([])
+            status = {
+                "state": "ready", "model": "claude-opus-5-5",
+                "context_percent": 21.2, "used_tokens": 175578, "window_tokens": 828400,
+                "usage": [
+                    {"label": "5h", "used_percent": 90, "reset_text": "Resets in 2h 10m"},
+                    {"label": "Weekly", "used_percent": 7, "reset_text": "Resets in 125h 30m"},
+                ],
+                "detail": "Live Claude Code status",
+                "session_name": "Bifrost · Enter the Grid with a very long session title",
+                "session_id": "123e4567-e89b-12d3-a456-426614174000",
+            }
+            window = desktop.StripWindow([("Claude Code", status), ("Codex", status)])
+            window.show()
+            app.processEvents()
+            left, right = window.panels
+            assert left.geometry().right() < right.geometry().left()
+            assert window.height() <= 96, window.size()
+            assert "Bifrost" in left._session_label.text()
+            assert "very long session title" in left._session_label.toolTip()
+            assert "claude-opus-5-5" in left._session_label.toolTip()
+            assert "123e4567-e89b-12d3-a456-426614174000" in left._session_label.toolTip()
+            for panel in window.panels:
+                for label in panel.findChildren(QLabel):
+                    if label.isVisible():
+                        assert label.width() >= label.sizeHint().width(), (label.text(), label.size())
+                        assert label.height() >= label.sizeHint().height(), (label.text(), label.size())
+            window.close()
+            """
+        )
+
+    def test_height_stays_fixed_when_session_names_contain_emojis(self):
+        self._run_qt_assertions(
+            """
+            import desktop
+            from PySide6.QtWidgets import QApplication
+            app = QApplication([])
+            status = {"state": "ready", "context_percent": 21, "session_name": "Bifrost",
+                      "usage": [{"label": "Weekly", "used_percent": 7}]}
+            window = desktop.StripWindow([("Claude Code", status), ("Codex", status)])
+            window.show()
+            for name in ["Bifrost", "🧠 PRs Brain", "✅ review", "👩🏽‍💻 Coding", "Bifrost"]:
+                window.update_sources([dict(status, session_name=name)] * 2)
+                for _ in range(3):
+                    app.processEvents()
+                assert window.height() == 96, (name, window.height())
+                for panel in window.panels:
+                    label = panel._session_label
+                    assert label.height() >= label.sizeHint().height(), (name, label.size())
+            window.update_sources([{"state": "closed"}] * 2)
+            app.processEvents()
+            assert window.height() == 96
+            window.close()
+            """
+        )
+
+    def test_percentages_heat_up_with_usage_and_unknown_values_stay_neutral(self):
+        self._run_qt_assertions(
+            """
+            import desktop
+            from PySide6.QtGui import QPalette
+            from PySide6.QtWidgets import QApplication
+            app = QApplication([])
+            window = desktop.StripWindow([("Codex", {"state": "ready"})])
+            window.show()
+            panel = window.panels[0]
+            for percent in [10, 65, 98, None]:
+                panel.update_status({"state": "ready", "context_percent": percent, "usage": [
+                    {"label": "5h", "used_percent": percent},
+                    {"label": "Weekly", "used_percent": percent},
+                ]})
+                app.processEvents()
+                for label in [panel._context_percent, *[values[0] for values in panel._usage_labels.values()]]:
+                    color = label.palette().color(QPalette.ColorRole.WindowText)
+                    if percent == 10:
+                        assert color.blue() > color.red() + 100, color.name()
+                    elif percent == 65:
+                        assert color.red() > 200 and 75 < color.green() < 150 and color.blue() < 100, color.name()
+                    elif percent == 98:
+                        assert color.red() > 200 and color.blue() > 150 and color.green() < 100, color.name()
+                    else:
+                        assert label.text() == "—"
+                        assert abs(color.red() - color.blue()) < 50, color.name()
+            window.close()
+            """
         )
 
     def test_the_strip_reopens_where_it_was_last_moved(self):
@@ -260,7 +353,7 @@ class DesktopStripWidgetTests(unittest.TestCase):
             assert second.pos() == QPoint(40, 50), second.pos()
 
             off_screen = settings()
-            off_screen.setValue("position", QPoint(-9000, -9000))
+            off_screen.setValue("horizontal-position", QPoint(-9000, -9000))
             off_screen.sync()
             third = module.StripWindow(status, settings())
             third.show()

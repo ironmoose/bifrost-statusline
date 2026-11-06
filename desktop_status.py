@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections import OrderedDict
 import json
 import math
+import os
 from pathlib import Path
 import subprocess
 import time
@@ -30,6 +31,63 @@ _USAGE_LABELS = {"five_hour": "5h", "seven_day": "Weekly"}
 _MODEL_HISTORY_BYTES = 8 * 1024 * 1024
 _MODEL_CACHE_LIMIT = 64
 _MODEL_CACHE: OrderedDict[tuple[str, int, int], tuple[str | None, int]] = OrderedDict()
+
+
+# Metadata reads stay bounded even when a conversation transcript is very large.
+_TITLE_BYTES = 512 * 1024
+_TITLE_CACHE: OrderedDict[tuple[str, int, int, str], tuple[int, int, str | None]] = OrderedDict()
+
+
+def _text(value: object) -> str:
+    return " ".join(value.split()) if isinstance(value, str) else ""
+
+
+def _session_id(value: object) -> str:
+    try:
+        return str(uuid.UUID(value)) if isinstance(value, str) else ""
+    except ValueError:
+        return ""
+
+
+def _session_title(path: Path, session_id: str, source: str) -> str | None:
+    """Read title metadata only, selecting the last complete matching record."""
+    try:
+        with path.open("rb") as file:
+            stat = os.fstat(file.fileno())
+            key = (str(path), stat.st_dev, stat.st_ino, session_id)
+            prior = _TITLE_CACHE.get(key)
+            if prior is not None and prior[:2] == (stat.st_size, stat.st_mtime_ns):
+                _TITLE_CACHE.move_to_end(key)
+                return prior[2]
+            # Keep a previously found title if it has since scrolled outside the tail.
+            title = prior[2] if prior is not None and stat.st_size > prior[0] else None
+            start = max(0, stat.st_size - _TITLE_BYTES)
+            file.seek(start)
+            lines = file.read(stat.st_size - start).split(b"\n")[:-1]
+            if start:
+                lines = lines[1:]
+            for line in lines:
+                try:
+                    record = json.loads(line)
+                except (ValueError, UnicodeError):
+                    continue
+                if not isinstance(record, dict):
+                    continue
+                if source == "Codex" and record.get("id") == session_id:
+                    candidate = record.get("thread_name")
+                elif source == "Claude Code" and record.get("type") == "custom-title":
+                    candidate = record.get("customTitle")
+                else:
+                    continue
+                if _text(candidate):
+                    title = _text(candidate)
+            _TITLE_CACHE[key] = (stat.st_size, stat.st_mtime_ns, title)
+            _TITLE_CACHE.move_to_end(key)
+            while len(_TITLE_CACHE) > 64:
+                _TITLE_CACHE.popitem(last=False)
+            return title
+    except OSError:
+        return None
 
 
 def _number(value: object) -> float | None:
@@ -226,7 +284,17 @@ def present_status(
         state = "ready"
         detail = details["ready"]
 
+    session_id = _session_id(snapshot.get("session_id"))
+    cwd = _text(snapshot.get("cwd"))
+    project = Path(cwd).name if cwd else "Session"
+    session_name = _text(snapshot.get("session_name"))
+    if not session_name:
+        session_name = f"{project} · {session_id[:8]}" if session_id else "Session unavailable"
+
     return {
+        "session_id": session_id,
+        "session_name": session_name,
+        "cwd": cwd,
         "state": state,
         "context_percent": context_percent,
         "used_tokens": token_total,
@@ -253,6 +321,14 @@ def load_status(path: Path | str | None, now: float | None = None) -> dict[str, 
         if _model_from_snapshot(raw_snapshot) is None and model is not None:
             raw_snapshot = {**raw_snapshot, "model": model}
         snapshot = codex_status.normalize_snapshot(raw_snapshot, now=now)
+        session_id = _session_id(rollout.stem[-36:])
+        if session_id:
+            codex_home = next(
+                (parent.parent for parent in rollout.parents if parent.name in ("sessions", "archived_sessions")),
+                Path(os.environ.get("CODEX_HOME", Path.home() / ".codex")),
+            )
+            snapshot["session_id"] = session_id
+            snapshot["session_name"] = _session_title(codex_home / "session_index.jsonl", session_id, "Codex")
         updated_at = stat.st_mtime
     except OSError:
         return _empty_status("unavailable", "Unable to read Codex rollout")
@@ -269,6 +345,17 @@ def load_claude_status(path: Path | str, now: float | None = None) -> dict[str, 
         return _empty_status("waiting", "Waiting for a Claude Code session")
     except (OSError, ValueError):
         return _empty_status("unavailable", "Unable to read Claude Code status")
+    if isinstance(payload, dict):
+        session_id = _session_id(payload.get("session_id"))
+        if session_id:
+            claude_home = (status_file.parent.parent if status_file.parent.name == "bifrost"
+                           else Path(os.environ.get("CLAUDE_CONFIG_DIR", Path.home() / ".claude")).expanduser())
+            try:
+                transcripts = list((claude_home / "projects").glob(f"*/{session_id}.jsonl"))
+            except OSError:
+                transcripts = []
+            if len(transcripts) == 1:
+                payload["session_name"] = _session_title(transcripts[0], session_id, "Claude Code")
     return present_status(payload, now=now, updated_at=updated_at, source="Claude Code")
 
 

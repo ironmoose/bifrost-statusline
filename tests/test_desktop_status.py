@@ -90,6 +90,49 @@ class FindRolloutTests(unittest.TestCase):
         self.assertIsNone(desktop_status.find_latest_rollout(self.codex_home))
 
 
+class SessionIdentityTests(unittest.TestCase):
+    def test_codex_context_uses_its_exact_session_title_and_picks_up_renames(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            rollout = home / "sessions" / "2026" / f"rollout-date-{SESSION_ID}.jsonl"
+            rollout.parent.mkdir(parents=True)
+            rollout.write_text(json.dumps({"type": "turn_context", "payload": {
+                "cwd": "/work/shared", "model": "gpt-6-luna"
+            }}) + "\n")
+            index = home / "session_index.jsonl"
+            index.write_text(json.dumps({"id": SESSION_ID, "thread_name": "Bifrost · Enter the Grid"}) + "\n" +
+                             json.dumps({"id": OTHER_SESSION_ID, "thread_name": "Wrong session"}) + "\n")
+            result = desktop_status.load_status(rollout)
+            self.assertEqual(result["session_name"], "Bifrost · Enter the Grid")
+            self.assertEqual(result["session_id"], SESSION_ID)
+            with index.open("a") as file:
+                file.write(json.dumps({"id": SESSION_ID, "thread_name": "Renamed Bifrost"}) + "\n")
+            self.assertEqual(desktop_status.load_status(rollout)["session_name"], "Renamed Bifrost")
+
+    def test_claude_name_matches_context_owner_instead_of_another_session(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            status = home / "bifrost" / "claude-status.json"
+            status.parent.mkdir()
+            status.write_text(json.dumps(_snapshot(session_id=SESSION_ID)))
+            project = home / "projects" / "-work-shared"
+            project.mkdir(parents=True)
+            (project / f"{SESSION_ID}.jsonl").write_text(
+                json.dumps({"type": "custom-title", "customTitle": "Old name"}) + "\n" +
+                json.dumps({"type": "custom-title", "customTitle": "IO-2484"}) + "\n")
+            (project / f"{OTHER_SESSION_ID}.jsonl").write_text(
+                json.dumps({"type": "custom-title", "customTitle": "Wrong session"}) + "\n")
+            result = desktop_status.load_claude_status(status)
+            self.assertEqual(result["session_name"], "IO-2484")
+            self.assertEqual(result["session_id"], SESSION_ID)
+            self.assertEqual(result["context_percent"], 42.5)
+
+    def test_missing_title_keeps_distinct_session_ids_in_a_shared_project(self):
+        result = desktop_status.present_status(_snapshot(session_id=SESSION_ID), now=NOW, updated_at=NOW)
+        self.assertEqual(result["session_name"], "demo · 123e4567")
+        self.assertEqual(result["session_id"], SESSION_ID)
+
+
 class PresentStatusTests(unittest.TestCase):
     def test_returns_ready_status_with_context_and_reset_fields(self):
         result = desktop_status.present_status(_snapshot(), now=NOW, updated_at=NOW - 10)

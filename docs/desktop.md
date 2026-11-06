@@ -1,15 +1,28 @@
 # Floating desktop strip
 
 `bifrost desktop` opens a small, frameless window that stays above other
-windows. With no arguments it shows two bars in one window:
+windows. The wide horizontal strip sits beside the macOS Dock, with Claude Code
+on the left and Codex on the right. With no arguments it shows both tools:
 
 - **Claude Code**, read from `~/.claude/bifrost/claude-status.json`
 - **Codex**, read from the rollout under `CODEX_HOME/sessions/**` (or
   `~/.codex/sessions/**`) that was written most recently
 
-Each bar shows the model, context used, and the five-hour and weekly windows
-with their reset times. Bars color by position on the same ramp as the
-terminal gauge, so a low fill stays cyan and only a high fill reaches red.
+Each panel names the session whose context is displayed, alongside context usage
+and the five-hour and weekly windows with their reset times. Codex names come
+from its local `session_index.jsonl`, matched to the rollout's session UUID.
+Claude names come from the matching session transcript's `custom-title` records.
+If a title is unavailable, the label uses the project directory plus a short
+session ID. Long names shorten with an ellipsis; hover over the name for the
+full title, model, session ID, and working directory. Title reads are cached
+and limited to the last 512 KiB of metadata; a title outside that range may
+initially use the fallback. Context and quota reads continue if names are missing.
+
+The label identifies the session supplying telemetry, rather than the foreground
+chat: Codex follows the most recently written rollout, while Claude follows the
+session last prompted. Five-hour and weekly quotas remain account-wide. Bars color by position on a smooth cyan → orange → magenta ramp. Low fill
+stays cool; high fill reaches magenta. Percentage numbers use the same ramp
+according to their current value, with unknown values shown in a neutral color.
 
 A bar hides while its tool is not running (no process named `claude` or
 `codex`), and comes back within two seconds of the tool starting. The Claude
@@ -100,9 +113,14 @@ with no source yet (no status file, no rollout) waits and keeps checking.
 
 ## Window controls
 
-Drag the header to move the window. The pin button toggles always-on-top and
-the × closes it. It reopens where you last moved it, saved with Qt's
+Drag the BIFROST grip on the left to move the window. The pin button toggles always-on-top and
+the × closes it. Hover over a source for its full status details. The angular frame and background
+grid are static. It reopens where you last moved it, saved with Qt's
 `QSettings` as `bifrost`/`desktop-strip` (on macOS,
-`~/Library/Preferences/com.bifrost.desktop-strip.plist`). The first time, or
-when that spot is no longer on any screen, it opens near the bottom center
-of the primary screen.
+`~/Library/Preferences/com.bifrost.desktop-strip.plist`). The horizontal layout saves its own `horizontal-position`, separate from the old
+vertical layout. The first time, or when that spot is no longer on any screen,
+it opens at the bottom-right of the primary screen, using the full screen so it
+can occupy the band beside the Dock. Drag it to whichever side is free on your
+desktop. Its height is fixed at 96 logical pixels, including room for emoji session names;
+width follows the visible sources and quota columns. It stays within the screen
+when those columns return.
